@@ -188,7 +188,6 @@ xianyu-auto-reply-fix/
 │   ├── requirements.txt                # Python依赖包列表
 │   ├── .gitignore                      # Git忽略文件配置
 │   ├── .gitattributes                  # Git属性配置
-│   ├── CHANGELOG.md                    # 版本更新日志
 │   └── README.md                       # 项目说明文档（本文件）
 └── 📊 数据目录（运行时创建）
     ├── data/                           # 数据目录（Docker挂载，自动创建）
