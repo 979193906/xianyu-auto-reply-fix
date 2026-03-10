@@ -14883,9 +14883,17 @@ let remoteVersionInfo = null;
 
 // 本地版本历史（远程服务禁用时使用）
 const LOCAL_VERSION_HISTORY = {
-    version: 'v1.5.2',
+    version: 'v1.5.3',
     intro: '本系统仅供个人学习研究使用，请勿用于商业用途。如有问题或建议，欢迎反馈。',
     versionHistory: [
+        {
+            version: 'v1.5.3',
+            date: '2026-03-10',
+            updates: [
+                '【修复】热更新执行权限改为按管理员身份校验，不再强依赖用户名必须为 admin',
+                '【修复】前端更新失败提示优先展示后端 detail 信息，避免只显示“未知错误”'
+            ]
+        },
         {
             version: 'v1.5.2',
             date: '2026-03-10',
