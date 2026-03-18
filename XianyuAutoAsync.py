@@ -1141,7 +1141,8 @@ class XianyuLive:
 
     async def _refresh_sid_lookup_if_needed(self, sid: str, sid_lookup: Dict[str, Any], *,
                                             item_id: str = None, buyer_id: str = None,
-                                            minutes: int = 10, log_prefix: str = "") -> Dict[str, Any]:
+                                            minutes: int = 10, allow_bargain_ready: bool = False,
+                                            log_prefix: str = "") -> Dict[str, Any]:
         """sid 命中未就绪订单时，强刷详情后再判定一次。"""
         recent_order = (sid_lookup or {}).get('order')
         match_type = (sid_lookup or {}).get('match_type', 'missing')
@@ -1187,6 +1188,22 @@ class XianyuLive:
             log_prefix=log_prefix
         )
         refreshed_order = refreshed_lookup.get('order') or {}
+
+        if (
+            allow_bargain_ready and
+            refreshed_lookup.get('match_type') == 'not_ready' and
+            refreshed_order and
+            str(refreshed_order.get('order_status') or '').strip() in {'processing', 'pending_payment'} and
+            self._has_bargain_success_evidence(refreshed_order)
+        ):
+            refreshed_lookup = dict(refreshed_lookup)
+            refreshed_lookup['match_type'] = 'bargain_ready'
+            logger.info(
+                f"{log_prefix} sid强刷后仍未进入待发货，但检测到小刀成功证据，"
+                f"改用小刀兜底发货: order_id={refreshed_order.get('order_id') or order_id}, "
+                f"status={refreshed_order.get('order_status') or 'unknown'}"
+            )
+
         logger.info(
             f"{log_prefix} sid强刷后重新判定: order_id={refreshed_order.get('order_id') or order_id}, "
             f"status={refreshed_order.get('order_status') or 'unknown'}, "
@@ -1874,6 +1891,9 @@ class XianyuLive:
                 buyer_id=buyer_id,
                 log_prefix=log_prefix,
             )
+            normalized_status = str(status or 'failed').strip().lower()
+            if normalized_status not in {'success', 'failed', 'skipped'}:
+                normalized_status = 'failed'
             db_manager.create_delivery_log(
                 user_id=self.user_id,
                 cookie_id=self.cookie_id,
@@ -1886,7 +1906,7 @@ class XianyuLive:
                 card_type=meta.get('card_type'),
                 match_mode=meta.get('match_mode'),
                 channel=channel or 'auto',
-                status='success' if str(status).lower() == 'success' else 'failed',
+                status=normalized_status,
                 reason=self._format_delivery_log_reason(reason, meta)
             )
         except Exception as log_e:
@@ -2101,9 +2121,13 @@ class XianyuLive:
         except (TypeError, ValueError):
             return None
 
+    def _has_bargain_success_evidence(self, order: dict = None) -> bool:
+        order = order or {}
+        return bool(order.get('bargain_success_detected'))
+
     def _mark_order_bargain_flow(self, order_id: str, item_id: str = None, buyer_id: str = None,
                                  sid: str = None, *, apply_configured_price: bool = False,
-                                 context: str = '') -> bool:
+                                 success_detected=..., context: str = '') -> bool:
         if not order_id:
             return False
 
@@ -2133,12 +2157,14 @@ class XianyuLive:
             amount=amount_to_save,
             cookie_id=self.cookie_id,
             bargain_flow_detected=True,
+            bargain_success_detected=success_detected,
         )
 
         if success:
             logger.info(
                 f"【{self.cookie_id}】标记订单为小刀流程: order_id={order_id}, context={context or 'unknown'}, "
-                f"apply_configured_price={apply_configured_price}, amount_override={amount_to_save or ''}"
+                f"apply_configured_price={apply_configured_price}, amount_override={amount_to_save or ''}, "
+                f"success_detected={success_detected if success_detected is not ... else 'unchanged'}"
             )
         else:
             logger.warning(
@@ -3010,7 +3036,7 @@ class XianyuLive:
                     order_id=order_id,
                     item_id=item_id,
                     buyer_id=user_id,
-                    status='failed',
+                    status='skipped',
                     reason='订单在冷却期内，跳过发货',
                     channel='auto'
                 )
@@ -3024,7 +3050,7 @@ class XianyuLive:
                     order_id=order_id,
                     item_id=item_id,
                     buyer_id=user_id,
-                    status='failed',
+                    status='skipped',
                     reason='订单延迟锁持有中，跳过发货',
                     channel='auto'
                 )
@@ -3044,7 +3070,7 @@ class XianyuLive:
                         order_id=order_id,
                         item_id=item_id,
                         buyer_id=user_id,
-                        status='failed',
+                        status='skipped',
                         reason='获取锁后发现订单已处理，跳过发货',
                         channel='auto'
                     )
@@ -3374,9 +3400,10 @@ class XianyuLive:
                 if fallback_sid:
                     try:
                         log_prefix = f'[{msg_time}] 【{self.cookie_id}】'
+                        sid_lookup_minutes = 5
                         sid_lookup = self._lookup_delivery_order_by_sid(
                             fallback_sid,
-                            minutes=10,
+                            minutes=sid_lookup_minutes,
                             log_prefix=log_prefix
                         )
                         sid_lookup = await self._refresh_sid_lookup_if_needed(
@@ -3384,7 +3411,8 @@ class XianyuLive:
                             sid_lookup,
                             item_id=item_id,
                             buyer_id=send_user_id,
-                            minutes=10,
+                            minutes=sid_lookup_minutes,
+                            allow_bargain_ready=True,
                             log_prefix=log_prefix
                         )
                     except Exception as sid_query_e:
@@ -3394,7 +3422,7 @@ class XianyuLive:
                     recent_order = sid_lookup.get('order')
                     sid_match_type = sid_lookup.get('match_type', 'missing')
 
-                    if recent_order and sid_match_type == 'pending_ship':
+                    if recent_order and sid_match_type in {'pending_ship', 'bargain_ready'}:
                         fallback_order_id = recent_order.get('order_id')
                         fallback_item_id = recent_order.get('item_id')
                         fallback_buyer_id = recent_order.get('buyer_id')
@@ -3418,6 +3446,12 @@ class XianyuLive:
                         order_id = fallback_order_id
                         if (not item_id or item_id == "未知商品") and fallback_item_id:
                             item_id = fallback_item_id
+
+                        if sid_match_type == 'bargain_ready':
+                            logger.info(
+                                f'[{msg_time}] 【{self.cookie_id}】✅ 订单ID提取失败，但检测到小刀成功证据，'
+                                f'使用sid兜底直接进入自动发货: sid={fallback_sid}, order_id={order_id}'
+                            )
 
                         logger.info(
                             f'[{msg_time}] 【{self.cookie_id}】✅ 订单ID提取失败，已通过sid兜底定位订单: '
@@ -7290,6 +7324,10 @@ Cookie数量: {cookie_count}
                     amount_source = _normalize_optional_text(result.get('amount_source')) or 'unknown'
                     item_config = db_manager.get_item_info(self.cookie_id, item_id) if item_id else None
                     item_config_multi_spec = bool(item_config and item_config.get('is_multi_spec'))
+                    item_config_detail = _normalize_optional_text(item_config.get('item_detail')) if item_config else None
+                    is_coin_deduction_item = bool(item_config_detail and '闲鱼币抵扣' in item_config_detail)
+                    configured_item_amount = _normalize_amount_text(item_config.get('item_price')) if item_config else None
+                    configured_item_amount_value = _parse_amount_float(configured_item_amount)
 
                     if item_config is not None and not item_config_multi_spec and any(
                         [spec_name, spec_value, spec_name_2, spec_value_2]
@@ -7353,6 +7391,20 @@ Cookie数量: {cookie_count}
                             'text_currency',
                             'unknown',
                         }
+
+                        if (
+                            is_coin_deduction_item and existing_amount_value is not None and incoming_amount_value is not None and
+                            configured_item_amount_value is not None and existing_amount_value + 0.009 < configured_item_amount_value and
+                            abs(incoming_amount_value - configured_item_amount_value) <= 0.009
+                        ):
+                            logger.warning(
+                                f"【{self.cookie_id}】闲鱼币抵扣订单返回原价，保留已有实付金额: "
+                                f"order_id={order_id}, existing_amount={existing_amount}, incoming_amount={amount}, "
+                                f"configured_amount={configured_item_amount}, amount_source={amount_source}"
+                            )
+                            amount = _normalize_amount_text(existing_amount)
+                            amount_source = 'coin_deduction_preserved_existing'
+                            incoming_amount_value = _parse_amount_float(amount)
 
                         if amount and amount_source in low_confidence_amount_sources and not has_valid_spec and not order_status:
                             if existing_amount_value is not None:
@@ -11250,9 +11302,10 @@ Cookie数量: {cookie_count}
                             logger.info(f'[{msg_time}] 【{self.cookie_id}】[{msg_id}] 🔍 简化消息解析: sid={simple_sid}, session_id={session_id_str}')
                             
                             log_prefix = f'[{msg_time}] 【{self.cookie_id}】[{msg_id}]'
+                            sid_lookup_minutes = 5
                             sid_lookup = self._lookup_delivery_order_by_sid(
                                 simple_sid,
-                                minutes=10,
+                                minutes=sid_lookup_minutes,
                                 log_prefix=log_prefix
                             )
                             sid_lookup = await self._refresh_sid_lookup_if_needed(
@@ -11260,17 +11313,24 @@ Cookie数量: {cookie_count}
                                 sid_lookup,
                                 item_id=item_id,
                                 buyer_id=user_id,
-                                minutes=10,
+                                minutes=sid_lookup_minutes,
+                                allow_bargain_ready=True,
                                 log_prefix=log_prefix
                             )
                             recent_order = sid_lookup.get('order')
                             sid_match_type = sid_lookup.get('match_type', 'missing')
                             
-                            if recent_order and sid_match_type == 'pending_ship':
+                            if recent_order and sid_match_type in {'pending_ship', 'bargain_ready'}:
                                 order_id = recent_order.get('order_id')
                                 real_item_id = recent_order.get('item_id')
                                 simple_user_id = recent_order.get('buyer_id', user_id)  # 从订单中获取buyer_id
                                 logger.info(f'[{msg_time}] 【{self.cookie_id}】[{msg_id}] ✅ 通过sid从数据库找到订单: order_id={order_id}, item_id={real_item_id}, buyer_id={simple_user_id}')
+
+                                if sid_match_type == 'bargain_ready':
+                                    logger.info(
+                                        f'[{msg_time}] 【{self.cookie_id}】[{msg_id}] ✅ 小刀订单缺少完整待发货卡片，'
+                                        f'使用sid+小刀成功证据兜底进入自动发货: order_id={order_id}'
+                                    )
                                 
                                 # 【防重复检查】先检查该订单是否已经在冷却期内（说明完整消息已经处理过）
                                 if not self.can_auto_delivery(order_id):
@@ -11843,6 +11903,7 @@ Cookie数量: {cookie_count}
                                 item_id=item_id,
                                 buyer_id=send_user_id,
                                 apply_configured_price=True,
+                                success_detected=True,
                                 context=f'{card_title or "waiting_bargain"}_success',
                             )
                             logger.info(f'[{msg_time}] 【{self.cookie_id}】✅ 自动免拼发货成功')
@@ -11864,6 +11925,7 @@ Cookie数量: {cookie_count}
                                 item_id=item_id,
                                 buyer_id=send_user_id,
                                 apply_configured_price=True,
+                                success_detected=True,
                                 context=card_title,
                             )
 

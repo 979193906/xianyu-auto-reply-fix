@@ -45,7 +45,15 @@ def _normalize_cached_amount(amount: Any) -> Optional[float]:
         return None
 
 
-def _should_use_cached_order(existing_order: Dict[str, Any]) -> bool:
+def _is_coin_deduction_item_config(item_config: Dict[str, Any]) -> bool:
+    if not item_config:
+        return False
+
+    detail_text = str(item_config.get('item_detail') or '').strip()
+    return '闲鱼币抵扣' in detail_text
+
+
+def _should_use_cached_order(existing_order: Dict[str, Any], item_config: Dict[str, Any] = None) -> bool:
     if not existing_order:
         return False
 
@@ -54,6 +62,11 @@ def _should_use_cached_order(existing_order: Dict[str, Any]) -> bool:
     has_valid_spec = bool((existing_order.get('spec_name') or '').strip() and (existing_order.get('spec_value') or '').strip())
     status_value = str(existing_order.get('order_status') or '').strip().lower()
     status_valid = bool(status_value and status_value not in ('unknown', 'processing'))
+
+    if _is_coin_deduction_item_config(item_config):
+        configured_amount = _normalize_cached_amount(item_config.get('item_price'))
+        if configured_amount is not None and amount_value is not None and abs(amount_value - configured_amount) <= 0.0009:
+            return False
 
     return amount_valid and (status_valid or has_valid_spec)
 
@@ -253,8 +266,11 @@ class OrderDetailFetcher:
 
                     if existing_order:
                         amount = existing_order.get('amount', '')
+                        item_config = None
+                        if existing_order.get('item_id') and existing_order.get('cookie_id'):
+                            item_config = db_manager.get_item_info(existing_order.get('cookie_id'), existing_order.get('item_id'))
 
-                        if _should_use_cached_order(existing_order):
+                        if _should_use_cached_order(existing_order, item_config=item_config):
                             logger.info(f"📋 订单 {order_id} 已存在于数据库中且金额有效({amount})，直接返回缓存数据")
                             print(f"✅ 订单 {order_id} 使用缓存数据，跳过浏览器获取")
 
@@ -801,6 +817,24 @@ class OrderDetailFetcher:
             'context': re.sub(r'\s+', ' ', str(context or '')).strip()[:240],
         })
 
+    def _score_amount_title_candidate(self, title_text: str) -> int:
+        normalized_title = re.sub(r'\s+', ' ', str(title_text or '')).strip()
+        if not normalized_title:
+            return 0
+
+        ignored_title_tokens = ['闲鱼币抵扣', '智能抵扣', '待收闲鱼币', '优惠', '立减', '折扣', '运费', '邮费', '红包', '券']
+        if any(token in normalized_title for token in ignored_title_tokens):
+            return 0
+
+        high_title_tokens = ['实付款', '订单金额', '应付金额', '应付', '实收金额', '实收', '付款金额', '支付金额', '实付', '成交价', '支付价', '最终价']
+        medium_title_tokens = ['改价后', '优惠后', '合计', '总价', '商品总价']
+
+        if any(token in normalized_title for token in high_title_tokens):
+            return 280
+        if any(token in normalized_title for token in medium_title_tokens):
+            return 170
+        return 0
+
     def _extract_amount_candidates_from_payload(
         self,
         payload: Any,
@@ -822,6 +856,27 @@ class OrderDetailFetcher:
                     if normalized_context_value:
                         context_fields.append(normalized_context_value)
             dict_context = ' | '.join(context_fields)[:240]
+
+            title_candidate = None
+            for title_key in ('title', 'label', 'name', 'preText', 'subTitle', 'displayText'):
+                title_value = payload.get(title_key)
+                if isinstance(title_value, (str, int, float)):
+                    normalized_title_value = re.sub(r'\s+', ' ', str(title_value)).strip()
+                    if normalized_title_value:
+                        title_candidate = normalized_title_value
+                        break
+
+            raw_value_candidate = payload.get('value')
+            title_score = self._score_amount_title_candidate(title_candidate)
+            if title_score > 0 and isinstance(raw_value_candidate, (str, int, float)):
+                self._append_amount_candidate(
+                    candidates,
+                    raw_value_candidate,
+                    'payload_title_value',
+                    title_score,
+                    path=f'{path}.value',
+                    context=title_candidate,
+                )
 
             for key, value in payload.items():
                 key_text = str(key)
@@ -1105,6 +1160,76 @@ class OrderDetailFetcher:
                 return normalized_amount, 'currency'
 
         return None, 'unknown'
+
+    def _extract_coin_deduction_value_from_text(self, text: str) -> Optional[str]:
+        if not text:
+            return None
+
+        normalized_text = re.sub(r'\s+', ' ', str(text)).strip()
+        if not normalized_text or '闲鱼币抵扣' not in normalized_text:
+            return None
+
+        patterns = [
+            r'闲鱼币抵扣[^0-9¥￥$]{0,20}[¥￥$]?\s*([0-9]+(?:\.[0-9]{1,2})?)',
+            r'([0-9]+(?:\.[0-9]{1,2})?)\s*(?:元|块)?\s*闲鱼币抵扣',
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, normalized_text)
+            if matches:
+                normalized_amount = self._normalize_amount_text(matches[-1])
+                if normalized_amount is not None:
+                    return normalized_amount
+
+        return None
+
+    def _resolve_coin_deduction_amount(
+        self,
+        primary_amount: Optional[str],
+        primary_source: str,
+        fallback_result: Dict[str, str],
+        page_text: str,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        if not primary_amount or not page_text or '闲鱼币抵扣' not in page_text:
+            return None, None
+
+        primary_amount_value = self._parse_amount_value(primary_amount)
+        if primary_amount_value is None or primary_amount_value <= 0:
+            return None, None
+
+        deduction_amount = self._extract_coin_deduction_value_from_text(page_text)
+        deduction_amount_value = self._parse_amount_value(deduction_amount)
+        if deduction_amount_value is not None and 0 < deduction_amount_value < primary_amount_value:
+            adjusted_amount = self._normalize_amount_text(f"{primary_amount_value - deduction_amount_value:.2f}")
+            adjusted_amount_value = self._parse_amount_value(adjusted_amount)
+            if adjusted_amount and adjusted_amount_value is not None and 0 < adjusted_amount_value < primary_amount_value:
+                logger.info(
+                    f"检测到闲鱼币抵扣，使用实付金额覆盖原价: primary={primary_amount}, deduction={deduction_amount}, "
+                    f"adjusted={adjusted_amount}, source={primary_source}"
+                )
+                return adjusted_amount, 'coin_deduction_adjusted'
+
+        fallback_amount = fallback_result.get('amount')
+        fallback_source = fallback_result.get('amount_source') or ''
+        fallback_amount_value = self._parse_amount_value(fallback_amount)
+        trusted_fallback_sources = {
+            'text_keyword_high',
+            'text_keyword_low',
+            'semantic_keyword_high',
+            'semantic_keyword_low',
+        }
+
+        if (
+            fallback_amount_value is not None and
+            0 < fallback_amount_value < primary_amount_value and
+            fallback_source in trusted_fallback_sources
+        ):
+            logger.info(
+                f"检测到闲鱼币抵扣，使用文本实付金额覆盖原价: primary={primary_amount}, "
+                f"fallback={fallback_amount}, fallback_source={fallback_source}, source={primary_source}"
+            )
+            return fallback_amount, f'coin_deduction_{fallback_source}'
+
+        return None, None
 
     async def _get_element_amount_context(self, element) -> str:
         """获取金额元素的局部上下文，用于判断当前数字是否真的是订单金额。"""
@@ -1434,7 +1559,7 @@ class OrderDetailFetcher:
         lines = [line.strip() for line in text.splitlines() if line and line.strip()]
 
         # 优先从金额关键词行提取金额
-        amount_keywords = ['实付款', '订单金额', '实收', '合计', '总价', '应付']
+        amount_keywords = ['实付款', '订单金额', '实收', '合计', '总价', '应付', '支付金额', '实付']
         for line in lines:
             if any(keyword in line for keyword in amount_keywords):
                 normalized_amount, amount_source = self._extract_preferred_amount_from_text(line)
@@ -1671,6 +1796,8 @@ class OrderDetailFetcher:
                 return {}
 
             result: Dict[str, str] = {}
+            page_text = await self._get_page_text()
+            fallback_result = self._extract_sku_from_text(page_text) if page_text else {}
 
             # 获取规格元素（主通道）
             sku_selector = '.sku--u_ddZval'
@@ -1686,6 +1813,16 @@ class OrderDetailFetcher:
             if amount is not None:
                 result['amount'] = amount
                 result['amount_source'] = amount_source
+
+            adjusted_coin_amount, adjusted_coin_source = self._resolve_coin_deduction_amount(
+                result.get('amount'),
+                result.get('amount_source', ''),
+                fallback_result,
+                page_text,
+            )
+            if adjusted_coin_amount is not None:
+                result['amount'] = adjusted_coin_amount
+                result['amount_source'] = adjusted_coin_source
 
             # 收集所有元素的内容
             all_contents = []
@@ -1761,9 +1898,6 @@ class OrderDetailFetcher:
                 or 'spec_value' not in result
                 or 'quantity' not in result
             ):
-                page_text = await self._get_page_text()
-                fallback_result = self._extract_sku_from_text(page_text)
-
                 for key in ['amount', 'amount_source', 'spec_name', 'spec_value', 'spec_name_2', 'spec_value_2', 'quantity']:
                     if key not in result and fallback_result.get(key):
                         result[key] = fallback_result[key]
@@ -1941,8 +2075,11 @@ async def fetch_order_detail_simple(
 
             if existing_order:
                 amount = existing_order.get('amount', '')
+                item_config = None
+                if existing_order.get('item_id') and existing_order.get('cookie_id'):
+                    item_config = db_manager.get_item_info(existing_order.get('cookie_id'), existing_order.get('item_id'))
 
-                if _should_use_cached_order(existing_order):
+                if _should_use_cached_order(existing_order, item_config=item_config):
                     logger.info(f"📋 订单 {order_id} 已存在于数据库中且金额有效({amount})，直接返回缓存数据")
                     print(f"✅ 订单 {order_id} 使用缓存数据，跳过浏览器获取")
 

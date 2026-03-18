@@ -1131,10 +1131,14 @@ function renderDashboardDeliveryLogs(logs) {
     }
 
     logs.forEach(log => {
-        const isSuccess = String(log.status || '').toLowerCase() === 'success';
+        const normalizedStatus = String(log.status || '').toLowerCase();
+        const isSuccess = normalizedStatus === 'success';
+        const isSkipped = normalizedStatus === 'skipped';
         const statusBadge = isSuccess
             ? '<span class="badge bg-success">成功</span>'
-            : '<span class="badge bg-danger">失败</span>';
+            : (isSkipped
+                ? '<span class="badge bg-secondary">已跳过</span>'
+                : '<span class="badge bg-danger">失败</span>');
 
         const matchModeLabelMap = {
             no_spec_match: '无规格',
@@ -1187,7 +1191,9 @@ function renderDashboardDeliveryLogs(logs) {
         const channelText = log.channel === 'manual' ? '手动' : '自动';
         const reasonText = isSuccess
             ? (log.reason || '发货成功')
-            : (log.reason || '未知失败原因');
+            : (isSkipped
+                ? (log.reason || '已跳过重复发货')
+                : (log.reason || '未知失败原因'));
 
         const tr = document.createElement('tr');
         tr.innerHTML = `

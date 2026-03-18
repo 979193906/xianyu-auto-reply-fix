@@ -5833,13 +5833,41 @@ def get_recent_delivery_logs(limit: int = 20, current_user: Dict[str, Any] = Dep
             cleaned_reason = reason_text[:bracket_start].rstrip()
             return cleaned_reason or reason_text, context
 
+        def is_redundant_skip_log(log: Dict[str, Any], successful_orders: set):
+            if str(log.get('status') or '').lower() != 'skipped':
+                return False
+
+            reason_text = str(log.get('reason') or '').strip()
+            order_id = str(log.get('order_id') or '').strip()
+            if not order_id or order_id not in successful_orders:
+                return False
+
+            redundant_reasons = {
+                '获取锁后发现订单已处理，跳过发货',
+                '订单延迟锁持有中，跳过发货',
+                '订单在冷却期内，跳过发货',
+            }
+            return reason_text in redundant_reasons
+
         user_id = current_user['user_id']
         safe_limit = max(1, min(int(limit), 200))
-        logs = db_manager.get_recent_delivery_logs(user_id=user_id, limit=safe_limit)
-        for log in logs:
+        raw_logs = db_manager.get_recent_delivery_logs(user_id=user_id, limit=min(safe_limit * 3, 600))
+        successful_orders = {
+            str(log.get('order_id') or '').strip()
+            for log in raw_logs
+            if str(log.get('status') or '').lower() == 'success' and str(log.get('order_id') or '').strip()
+        }
+
+        logs = []
+        for log in raw_logs:
             cleaned_reason, context = extract_spec_mode_context(log.get('reason'))
             log['reason'] = cleaned_reason
             log.update(context)
+            if is_redundant_skip_log(log, successful_orders):
+                continue
+            logs.append(log)
+            if len(logs) >= safe_limit:
+                break
         return {"logs": logs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
