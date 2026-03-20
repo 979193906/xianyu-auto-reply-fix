@@ -5,12 +5,12 @@ ARG BASE_IMAGE=python:3.11-slim-bookworm
 FROM ${BASE_IMAGE}
 
 # 设置标签信息
-LABEL maintainer="zhinianboke"
+LABEL maintainer="GuDong2003"
 LABEL version="2.1.0"
-LABEL description="闲鱼自动回复系统 - 企业级多用户版本，支持自动发货和免拼发货"
-LABEL repository="https://github.com/zhinianboke/xianyu-auto-reply"
-LABEL license="仅供学习使用，禁止商业用途"
-LABEL author="zhinianboke"
+LABEL description="闲鱼管理系统 - GuDong2003 维护版本，支持多用户、多账号与自动化管理"
+LABEL repository="https://github.com/GuDong2003/xianyu-auto-reply-fix"
+LABEL license="仅供学习与研究使用，禁止商业用途"
+LABEL author="GuDong2003"
 LABEL build-date=""
 LABEL vcs-ref=""
 

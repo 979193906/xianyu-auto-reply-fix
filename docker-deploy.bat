@@ -2,13 +2,13 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-REM 闲鱼自动回复系统 Docker 部署脚本 (Windows版本)
+REM 闲鱼管理系统 Docker 部署脚本 (Windows版本)
 REM 支持快速部署和管理
 
-title 闲鱼自动回复系统 Docker 部署
+title 闲鱼管理系统 Docker 部署
 
 REM 项目配置
-set PROJECT_NAME=xianyu-auto-reply
+set PROJECT_NAME=xianyu-auto-reply-fix
 set COMPOSE_FILE=docker-compose.yml
 set "COMPOSE_CMD=docker-compose"
 
@@ -205,7 +205,7 @@ echo.
 goto :eof
 
 :show_help
-echo 闲鱼自动回复系统 Docker 部署脚本 (Windows版本)
+echo 闲鱼管理系统 Docker 部署脚本 (Windows版本)
 echo.
 echo 用法: %~nx0 [命令]
 echo.

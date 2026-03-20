@@ -12,22 +12,34 @@ echo "  多架构 Docker 镜像构建脚本"
 echo "========================================"
 echo
 
-# 设置镜像标签（可根据需要修改）
-IMAGE_NAME="xianyu-replay-fixed"
-IMAGE_TAG="latest"
-DOCKERFILE="Dockerfile-cn"
+# 设置镜像标签（可通过环境变量覆盖）
+IMAGE_NAME="${IMAGE_NAME:-xianyu-auto-reply-fix}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+DOCKERFILE="${DOCKERFILE:-Dockerfile-cn}"
 
 # ==================== 自动化配置 ====================
-# 自动推送到镜像仓库
-PUSH_IMAGE="y"
-REGISTRY="crpi-ewihweek11p6l2rf.cn-shanghai.personal.cr.aliyuncs.com/price_ma"
-FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-PUSH_FLAG="--push"
+PUSH_IMAGE="${PUSH_IMAGE:-n}"
+REGISTRY="${REGISTRY:-}"
+
+if [ "$PUSH_IMAGE" = "y" ]; then
+    if [ -z "$REGISTRY" ]; then
+        echo "[错误] PUSH_IMAGE=y 时必须通过环境变量 REGISTRY 指定镜像仓库前缀"
+        echo "示例: REGISTRY=ghcr.io/your-name PUSH_IMAGE=y ./build-multi-arch.sh"
+        exit 1
+    fi
+    FULL_IMAGE_NAME="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+    OUTPUT_FLAG="--push"
+    PUSH_STATUS="是"
+else
+    FULL_IMAGE_NAME="${IMAGE_NAME}:${IMAGE_TAG}"
+    OUTPUT_FLAG="--load"
+    PUSH_STATUS="否（仅加载到本地）"
+fi
 
 echo "配置信息："
 echo "  - 镜像名: $FULL_IMAGE_NAME"
 echo "  - Dockerfile: $DOCKERFILE"
-echo "  - 推送到仓库: 是"
+echo "  - 推送到仓库: $PUSH_STATUS"
 echo
 
 # 显示当前构建目录
@@ -114,19 +126,39 @@ else
 fi
 echo
 
+LOCAL_PLATFORM="linux/amd64"
+case "$(uname -m)" in
+    x86_64|amd64)
+        LOCAL_PLATFORM="linux/amd64"
+        ;;
+    arm64|aarch64)
+        LOCAL_PLATFORM="linux/arm64"
+        ;;
+esac
+
+if [ "$PUSH_IMAGE" = "y" ]; then
+    TARGET_PLATFORMS="$PLATFORMS"
+else
+    TARGET_PLATFORMS="$LOCAL_PLATFORM"
+fi
+
 echo "========================================"
 echo "步骤 6: 开始构建镜像"
 echo "========================================"
 echo "镜像名称: $FULL_IMAGE_NAME"
 echo "Dockerfile: $DOCKERFILE"
-echo "平台: $PLATFORMS"
+echo "平台: $TARGET_PLATFORMS"
 echo
 
 if [ "$SUPPORT_ARM64" = "true" ]; then
     echo "[提示] ARM64 构建使用 QEMU 模拟，速度较慢，请耐心等待..."
 fi
 
-docker buildx build --platform "$PLATFORMS" -t "$FULL_IMAGE_NAME" -f "$DOCKERFILE" . $PUSH_FLAG $BASE_IMAGE_ARG
+if [ "$PUSH_IMAGE" != "y" ]; then
+    echo "[提示] 未启用推送，当前仅构建并加载本机架构镜像"
+fi
+
+docker buildx build --platform "$TARGET_PLATFORMS" -t "$FULL_IMAGE_NAME" -f "$DOCKERFILE" . $OUTPUT_FLAG $BASE_IMAGE_ARG
 if [ $? -ne 0 ]; then
     echo ""
     echo "[错误] 构建失败"
@@ -137,12 +169,22 @@ echo
 echo "========================================"
 echo "✓ 构建完成！"
 echo "========================================"
-echo "镜像已推送到: $FULL_IMAGE_NAME"
+if [ "$PUSH_IMAGE" = "y" ]; then
+    echo "镜像已推送到: $FULL_IMAGE_NAME"
+else
+    echo "镜像已加载到本地: $FULL_IMAGE_NAME"
+fi
 echo
 echo "使用方法:"
-echo "  docker pull $FULL_IMAGE_NAME"
-echo "  docker run -d -p 8080:8080 --name xianyu-auto-reply $FULL_IMAGE_NAME"
+if [ "$PUSH_IMAGE" = "y" ]; then
+    echo "  docker pull $FULL_IMAGE_NAME"
+fi
+echo "  docker run -d -p 8090:8090 --name xianyu-auto-reply-fix $FULL_IMAGE_NAME"
 echo
 echo "验证多架构镜像:"
-echo "  docker buildx imagetools inspect $FULL_IMAGE_NAME"
+if [ "$PUSH_IMAGE" = "y" ]; then
+    echo "  docker buildx imagetools inspect $FULL_IMAGE_NAME"
+else
+    echo "  docker image inspect $FULL_IMAGE_NAME"
+fi
 echo

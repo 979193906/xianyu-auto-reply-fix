@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 闲鱼自动回复系统 Docker 部署脚本
+# 闲鱼管理系统 Docker 部署脚本
 # 支持快速部署和管理
 
 set -e
@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 项目配置
-PROJECT_NAME="xianyu-auto-reply"
+PROJECT_NAME="xianyu-auto-reply-fix"
 COMPOSE_FILE="docker-compose.yml"
 SELECTED_COMPOSE_FILE="$COMPOSE_FILE"
 
@@ -297,7 +297,7 @@ cleanup() {
 
 # 显示帮助信息
 show_help() {
-    echo "闲鱼自动回复系统 Docker 部署脚本"
+    echo "闲鱼管理系统 Docker 部署脚本"
     echo ""
     echo "用法: $0 [命令] [选项]"
     echo ""
