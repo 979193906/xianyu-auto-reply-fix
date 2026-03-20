@@ -15012,7 +15012,7 @@ function exportSearchResults() {
 
 
 // 默认版本号（当无法读取 version.txt 时使用）
-const DEFAULT_VERSION = 'v1.7.1';
+const DEFAULT_VERSION = 'v1.7.2';
 
 // 当前本地版本号（动态从 version.txt 读取）
 let LOCAL_VERSION = DEFAULT_VERSION;
@@ -15126,9 +15126,20 @@ function clearIgnoredUpdateVersion(showFeedback = true) {
 
 // 本地版本历史（远程服务禁用时使用）
 const LOCAL_VERSION_HISTORY = {
-    version: 'v1.7.1',
+    version: 'v1.7.2',
     intro: '本系统仅供个人学习研究使用，请勿用于商业用途。如有问题或建议，欢迎反馈。',
     versionHistory: [
+        {
+            version: 'v1.7.2',
+            date: '2026-03-20',
+            updates: [
+                '【新功能】账号列表新增商品一键擦亮入口，可批量执行当前在售商品擦亮',
+                '【新功能】新增每日定时擦亮任务，支持按账号配置启用状态、执行时段与随机延迟',
+                '【优化】后台新增定时任务调度与执行结果记录，便于查看下次执行时间和最近运行情况',
+                '【优化】管理端补充擦亮相关操作入口与设置弹窗，日常运营更方便',
+                '【优化】账号管理页调整列表列宽与仪表盘赞助按钮样式，提升界面可读性与交互一致性'
+            ]
+        },
         {
             version: 'v1.7.1',
             date: '2026-03-19',
