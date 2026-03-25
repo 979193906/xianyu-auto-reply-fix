@@ -19,6 +19,14 @@ class ImageUploader:
         self.cookies_str = cookies_str
         self.upload_url = "https://stream-upload.goofish.com/api/upload.api?floderId=0&appkey=xy_chat&_input_charset=utf-8"
         self.session = None
+        self.last_error_type = None
+        self.last_error_message = None
+        self.last_http_status = None
+
+    def _set_last_error(self, error_type: Optional[str], message: Optional[str] = None, status: Optional[int] = None):
+        self.last_error_type = error_type
+        self.last_error_message = message
+        self.last_http_status = status
     
     async def create_session(self):
         """创建HTTP会话"""
@@ -96,6 +104,7 @@ class ImageUploader:
     async def upload_image(self, image_path: str) -> Optional[str]:
         """上传图片到闲鱼CDN"""
         temp_path = None
+        self._set_last_error(None)
         try:
             if not self.session:
                 await self.create_session()
@@ -144,16 +153,24 @@ class ImageUploader:
                     # 解析响应获取图片URL
                     image_url = self._parse_upload_response(response_text)
                     if image_url:
+                        self._set_last_error(None)
                         logger.info(f"图片上传成功: {image_url}")
                         return image_url
                     else:
                         logger.error("解析上传响应失败")
                         return None
                 else:
+                    error_type = 'auth' if response.status in (401, 403) else 'http'
+                    self._set_last_error(error_type, f"HTTP {response.status}", response.status)
                     logger.error(f"图片上传失败: HTTP {response.status}")
                     return None
                     
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            self._set_last_error('network', str(e))
+            logger.error(f"图片上传异常: {e}")
+            return None
         except Exception as e:
+            self._set_last_error('unknown', str(e))
             logger.error(f"图片上传异常: {e}")
             return None
         finally:
@@ -170,6 +187,7 @@ class ImageUploader:
             # 检查是否返回了登录页面（Cookie失效的标志）
             if '<!DOCTYPE html>' in response_text or '<html>' in response_text:
                 if '闲鱼' in response_text and ('login' in response_text.lower() or 'mini-login' in response_text):
+                    self._set_last_error('auth', '返回登录页面')
                     logger.error("❌ 图片上传失败：Cookie已失效，返回了登录页面！请重新登录获取有效的Cookie")
                     logger.error("💡 解决方法：")
                     logger.error("   1. 打开浏览器访问 https://www.goofish.com/")
@@ -178,6 +196,7 @@ class ImageUploader:
                     logger.error("   4. 复制完整的Cookie字符串，更新配置文件中的Cookie")
                     return None
                 else:
+                    self._set_last_error('html_response', '返回HTML页面')
                     logger.error(f"收到HTML响应而非JSON，可能是Cookie失效: {response_text[:500]}")
                     return None
             
@@ -186,36 +205,44 @@ class ImageUploader:
             
             # 方式1: 标准响应格式
             if 'data' in response_data and 'url' in response_data['data']:
+                self._set_last_error(None)
                 return response_data['data']['url']
             
             # 方式2: 在object字段中（闲鱼CDN的响应格式）
             if 'object' in response_data and isinstance(response_data['object'], dict):
                 obj = response_data['object']
                 if 'url' in obj:
+                    self._set_last_error(None)
                     logger.info(f"从object.url提取到图片URL: {obj['url']}")
                     return obj['url']
 
             # 方式3: 直接在根级别
             if 'url' in response_data:
+                self._set_last_error(None)
                 return response_data['url']
 
             # 方式4: 在result中
             if 'result' in response_data and 'url' in response_data['result']:
+                self._set_last_error(None)
                 return response_data['result']['url']
 
             # 方式5: 检查是否有文件信息
             if 'data' in response_data and isinstance(response_data['data'], dict):
                 data = response_data['data']
                 if 'fileUrl' in data:
+                    self._set_last_error(None)
                     return data['fileUrl']
                 if 'file_url' in data:
+                    self._set_last_error(None)
                     return data['file_url']
             
+            self._set_last_error('response_parse', '无法从响应中提取图片URL')
             logger.error(f"无法从响应中提取图片URL: {response_data}")
             return None
             
         except json.JSONDecodeError:
             # 如果不是JSON格式，尝试其他解析方式
+            self._set_last_error('response_parse', '响应不是有效JSON格式')
             logger.error(f"响应不是有效的JSON格式，可能是Cookie失效: {response_text[:200]}...")
             return None
         except Exception as e:

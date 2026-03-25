@@ -5,6 +5,7 @@ import time
 import base64
 import os
 import random
+import threading
 from enum import Enum
 from loguru import logger
 import websockets
@@ -22,7 +23,7 @@ from config import (
 import sys
 import aiohttp
 from collections import defaultdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from db_manager import db_manager
 
 # 滑块验证补丁已废弃，使用集成的 Playwright 登录方法
@@ -223,10 +224,19 @@ class XianyuLive:
     # 类级别的密码登录时间记录，用于防止重复登录
     _last_password_login_time = {}  # {cookie_id: timestamp}
     _password_login_cooldown = 60  # 密码登录冷却时间：60秒
+    _password_login_failure_backoff = {}  # {cookie_id: {'until': float, 'reason': str, 'seconds': int}}
+
+    # 手动刷新状态：用于避免手动刷新与自动滑块/自动Cookie刷新互相踩踏
+    _manual_refresh_state = {}  # {cookie_id: {'source': str, 'started_at': float, 'previous_cookie_refresh_enabled': Optional[bool]}}
+    _manual_refresh_lock = threading.Lock()
 
     # 扫码登录token预热缓存，避免扫码成功后正式任务立即再次刷新token
     _qr_prewarmed_tokens = {}  # {cookie_id: {'token': str, 'timestamp': float}}
     _qr_prewarmed_token_ttl = 180  # 秒
+
+    # 扫码登录后的短期缓冲状态：首轮 token 刷新命中风控时，先做浏览器侧稳定化再决定是否上滑块
+    _qr_login_grace_state = {}  # {cookie_id: {'timestamp': float, 'captcha_buffer_used': bool, 'browser_stabilized': bool}}
+    _qr_login_grace_ttl = 180  # 秒
 
     @classmethod
     def _cleanup_qr_prewarmed_tokens(cls):
@@ -270,6 +280,118 @@ class XianyuLive:
         if not cookie_id:
             return
         cls._qr_prewarmed_tokens.pop(cookie_id, None)
+
+    @classmethod
+    def _cleanup_qr_login_grace_state(cls):
+        """清理过期的扫码登录缓冲状态"""
+        now = time.time()
+        expired_cookie_ids = [
+            cookie_id
+            for cookie_id, state in cls._qr_login_grace_state.items()
+            if now - state.get('timestamp', 0) > cls._qr_login_grace_ttl
+        ]
+        for cookie_id in expired_cookie_ids:
+            cls._qr_login_grace_state.pop(cookie_id, None)
+
+    @classmethod
+    def mark_qr_login_grace(cls, cookie_id: str, **extra_state):
+        """标记账号刚完成扫码登录，后续首轮 token 刷新可走更保守的缓冲分支"""
+        if not cookie_id:
+            return
+        cls._cleanup_qr_login_grace_state()
+        state = {
+            'timestamp': time.time(),
+            'captcha_buffer_used': False,
+            'browser_stabilized': False,
+        }
+        state.update(extra_state)
+        cls._qr_login_grace_state[cookie_id] = state
+
+    @classmethod
+    def get_qr_login_grace(cls, cookie_id: str) -> Optional[Dict[str, Any]]:
+        """获取扫码登录缓冲状态，过期则自动忽略"""
+        if not cookie_id:
+            return None
+        cls._cleanup_qr_login_grace_state()
+        state = cls._qr_login_grace_state.get(cookie_id)
+        if not state:
+            return None
+        if time.time() - state.get('timestamp', 0) > cls._qr_login_grace_ttl:
+            cls._qr_login_grace_state.pop(cookie_id, None)
+            return None
+        return state
+
+    @classmethod
+    def update_qr_login_grace(cls, cookie_id: str, **updates):
+        """更新扫码登录缓冲状态"""
+        state = cls.get_qr_login_grace(cookie_id)
+        if not state:
+            return None
+        state.update(updates)
+        cls._qr_login_grace_state[cookie_id] = state
+        return state
+
+    @classmethod
+    def clear_qr_login_grace(cls, cookie_id: str):
+        """清理指定账号的扫码登录缓冲状态"""
+        if not cookie_id:
+            return
+        cls._qr_login_grace_state.pop(cookie_id, None)
+
+    @classmethod
+    def _cleanup_password_login_failure_backoff(cls):
+        """清理已过期的密码登录失败退避状态"""
+        now = time.time()
+        expired_cookie_ids = [
+            cookie_id
+            for cookie_id, state in cls._password_login_failure_backoff.items()
+            if now >= state.get('until', 0)
+        ]
+        for cookie_id in expired_cookie_ids:
+            cls._password_login_failure_backoff.pop(cookie_id, None)
+
+    @classmethod
+    def get_password_login_failure_backoff(cls, cookie_id: str) -> Optional[Dict[str, Any]]:
+        """获取当前账号的密码登录失败退避状态"""
+        if not cookie_id:
+            return None
+        cls._cleanup_password_login_failure_backoff()
+        return cls._password_login_failure_backoff.get(cookie_id)
+
+    @classmethod
+    def clear_password_login_failure_backoff(cls, cookie_id: str):
+        """清理指定账号的密码登录失败退避状态"""
+        if not cookie_id:
+            return
+        cls._password_login_failure_backoff.pop(cookie_id, None)
+
+    @classmethod
+    def set_password_login_failure_backoff(cls, cookie_id: str, reason: str, seconds: int):
+        """设置密码登录失败后的退避时间"""
+        if not cookie_id or seconds <= 0:
+            return
+        cls._password_login_failure_backoff[cookie_id] = {
+            'until': time.time() + seconds,
+            'reason': reason,
+            'seconds': seconds,
+            'created_at': time.time(),
+        }
+
+    @staticmethod
+    def classify_password_login_failure(error_message: str) -> Tuple[str, int]:
+        """按失败类型返回(原因标签, 退避秒数)"""
+        message = (error_message or "").lower()
+        if any(keyword in message for keyword in ["账号密码错误", "账密错误", "用户名或密码错误", "密码错误"]):
+            return "credentials", 1800
+        if any(keyword in message for keyword in ["前置滑块", "风控", "拦截", "框体错误", "点击框体重试"]):
+            return "risk_control", 900
+        if any(keyword in message for keyword in ["滑块验证失败", "未找到滑块容器"]):
+            return "slider_failed", 600
+        if any(keyword in message for keyword in ["页面会话已失效", "target page, context or browser has been closed"]):
+            return "page_session_lost", 300
+        if any(keyword in message for keyword in ["网络", "timeout", "cannot connect", "连接", "dns", "ssl"]):
+            return "network", 180
+        return "unknown", 300
     
     def _safe_str(self, e):
         """安全地将异常转换为字符串"""
@@ -1017,6 +1139,83 @@ class XianyuLive:
     def get_instance_count(cls):
         """获取当前活跃实例数量"""
         return len(cls._instances)
+
+    @classmethod
+    def is_manual_refresh_active(cls, cookie_id: str) -> bool:
+        """检查指定账号是否处于手动刷新保护期"""
+        if not cookie_id:
+            return False
+        with cls._manual_refresh_lock:
+            return cookie_id in cls._manual_refresh_state
+
+    @classmethod
+    def begin_manual_refresh(cls, cookie_id: str, source: str = "manual_refresh") -> Dict[str, Any]:
+        """标记账号进入手动刷新保护期，并暂停自动Cookie刷新"""
+        if not cookie_id:
+            return {"started": False, "already_active": False, "reason": "empty_cookie_id"}
+
+        live_instance = cls.get_instance(cookie_id)
+        previous_cookie_refresh_enabled = None
+        if live_instance is not None:
+            previous_cookie_refresh_enabled = live_instance.cookie_refresh_enabled
+
+        with cls._manual_refresh_lock:
+            existing = cls._manual_refresh_state.get(cookie_id)
+            if existing:
+                existing["source"] = source
+                existing["updated_at"] = time.time()
+                return {
+                    "started": False,
+                    "already_active": True,
+                    "previous_cookie_refresh_enabled": existing.get("previous_cookie_refresh_enabled")
+                }
+
+            cls._manual_refresh_state[cookie_id] = {
+                "source": source,
+                "started_at": time.time(),
+                "updated_at": time.time(),
+                "previous_cookie_refresh_enabled": previous_cookie_refresh_enabled,
+            }
+
+        if live_instance is not None and previous_cookie_refresh_enabled is not None:
+            live_instance.enable_cookie_refresh(False)
+            logger.warning(f"【{cookie_id}】已进入手动刷新保护期，暂停自动Cookie刷新")
+        else:
+            logger.warning(f"【{cookie_id}】已进入手动刷新保护期，当前无运行中的账号实例")
+
+        return {
+            "started": True,
+            "already_active": False,
+            "previous_cookie_refresh_enabled": previous_cookie_refresh_enabled
+        }
+
+    @classmethod
+    def end_manual_refresh(cls, cookie_id: str, source: str = "manual_refresh") -> bool:
+        """结束手动刷新保护期，并按原状态恢复自动Cookie刷新"""
+        if not cookie_id:
+            return False
+
+        with cls._manual_refresh_lock:
+            state = cls._manual_refresh_state.pop(cookie_id, None)
+
+        if state is None:
+            return False
+
+        live_instance = cls.get_instance(cookie_id)
+        previous_cookie_refresh_enabled = state.get("previous_cookie_refresh_enabled")
+        if live_instance is not None and previous_cookie_refresh_enabled is not None:
+            live_instance.enable_cookie_refresh(previous_cookie_refresh_enabled)
+            if previous_cookie_refresh_enabled:
+                # 手动刷新刚结束时，避免新实例立刻再触发一轮自动Cookie刷新。
+                live_instance.last_cookie_refresh_time = time.time()
+            logger.warning(
+                f"【{cookie_id}】手动刷新保护期已结束，恢复自动Cookie刷新: {previous_cookie_refresh_enabled}"
+            )
+        else:
+            logger.warning(f"【{cookie_id}】手动刷新保护期已结束，当前无运行中的账号实例可恢复")
+
+        logger.info(f"【{cookie_id}】结束手动刷新保护期，来源: {source}")
+        return True
     
     def _create_tracked_task(self, coro):
         """创建并追踪后台任务，确保异常不会被静默忽略"""
@@ -4172,6 +4371,7 @@ class XianyuLive:
                                 # 【消息接收时间重置】Token刷新成功后重置消息接收标志，与 cookie_refresh_loop 保持一致
                                 self.last_message_received_time = 0
                                 logger.warning(f"【{self.cookie_id}】Token刷新成功，已重置消息接收时间标识")
+                                self.clear_qr_login_grace(self.cookie_id)
 
                                 logger.info(f"【{self.cookie_id}】Token刷新成功")
                                 # 标记为成功
@@ -4180,6 +4380,46 @@ class XianyuLive:
 
                     # 检查是否需要滑块验证
                     if self._need_captcha_verification(res_json):
+                        qr_login_grace = self.get_qr_login_grace(self.cookie_id)
+                        if qr_login_grace and not qr_login_grace.get('captcha_buffer_used'):
+                            logger.warning(f"【{self.cookie_id}】扫码登录后的首轮Token刷新命中风控，先执行浏览器侧Cookie稳定化")
+                            log_captcha_event(
+                                self.cookie_id,
+                                "扫码登录首轮Token刷新命中风控，先执行浏览器侧稳定化",
+                                None,
+                                f"触发场景: Token刷新, ret={res_json.get('ret', [])}"
+                            )
+                            self.update_qr_login_grace(
+                                self.cookie_id,
+                                captcha_buffer_used=True,
+                                captcha_detected_at=time.time()
+                            )
+                            await asyncio.sleep(2)
+                            stabilization_success = await self._refresh_cookies_via_browser_page(
+                                self.cookies_str,
+                                restart_on_success=False
+                            )
+                            if stabilization_success:
+                                self.update_qr_login_grace(
+                                    self.cookie_id,
+                                    browser_stabilized=True,
+                                    browser_stabilized_at=time.time()
+                                )
+                                logger.info(f"【{self.cookie_id}】浏览器侧Cookie稳定化完成，重新尝试Token刷新")
+                                return await self.refresh_token(captcha_retry_count)
+                            logger.warning(f"【{self.cookie_id}】浏览器侧Cookie稳定化未消除风控，继续进入滑块验证")
+
+                        if self.is_manual_refresh_active(self.cookie_id):
+                            logger.warning(f"【{self.cookie_id}】检测到手动刷新进行中，跳过自动滑块处理")
+                            log_captcha_event(
+                                self.cookie_id,
+                                "手动刷新进行中，跳过自动滑块处理",
+                                None,
+                                "触发场景: Token刷新"
+                            )
+                            notification_sent = True
+                            return None
+
                         logger.warning(f"【{self.cookie_id}】检测到需要滑块验证，开始处理...")
 
                         # 记录滑块验证检测到日志文件
@@ -4282,6 +4522,11 @@ class XianyuLive:
                                 logger.error(f"【{self.cookie_id}】记录风控日志失败: {log_e}")
 
                             # 调用统一的密码登录刷新方法
+                            if self.is_manual_refresh_active(self.cookie_id):
+                                logger.warning(f"【{self.cookie_id}】检测到手动刷新进行中，跳过自动密码登录刷新")
+                                notification_sent = True
+                                return None
+
                             refresh_success = await self._try_password_login_refresh("令牌/Session过期")
                             
                             if not refresh_success:
@@ -4398,6 +4643,16 @@ class XianyuLive:
         """处理滑块验证，返回新的cookies字符串"""
         try:
             logger.info(f"【{self.cookie_id}】开始处理滑块验证...")
+
+            if self.is_manual_refresh_active(self.cookie_id):
+                logger.warning(f"【{self.cookie_id}】手动刷新进行中，取消自动滑块处理")
+                log_captcha_event(
+                    self.cookie_id,
+                    "手动刷新进行中，取消自动滑块处理",
+                    None,
+                    "自动滑块处理已跳过"
+                )
+                return None
 
             # 获取验证URL
             verification_url = None
@@ -4782,8 +5037,21 @@ class XianyuLive:
         """
         logger.warning(f"【{self.cookie_id}】检测到{trigger_reason}，准备刷新Cookie并重启实例...")
 
+        if self.is_manual_refresh_active(self.cookie_id):
+            logger.warning(f"【{self.cookie_id}】手动刷新进行中，跳过自动密码登录刷新")
+            return False
+
         # 检查是否在密码登录冷却期内，避免重复登录
         current_time = time.time()
+        failure_backoff = XianyuLive.get_password_login_failure_backoff(self.cookie_id)
+        if failure_backoff:
+            remaining_time = failure_backoff.get('until', 0) - current_time
+            if remaining_time > 0:
+                logger.warning(
+                    f"【{self.cookie_id}】密码登录失败退避中（原因: {failure_backoff.get('reason', 'unknown')}），还需等待 {remaining_time:.1f} 秒"
+                )
+                return False
+
         last_password_login = XianyuLive._last_password_login_time.get(self.cookie_id, 0)
         time_since_last_login = current_time - last_password_login
         
@@ -4872,6 +5140,7 @@ class XianyuLive:
             if result:
                 logger.info(f"【{self.cookie_id}】密码登录成功，获取到Cookie")
                 logger.info(f"【{self.cookie_id}】Cookie内容: {result}")
+                XianyuLive.clear_password_login_failure_backoff(self.cookie_id)
                 
                 # 打印密码登录获取的Cookie字段详情
                 logger.info(f"【{self.cookie_id}】========== 密码登录Cookie字段详情 ==========")
@@ -4924,10 +5193,16 @@ class XianyuLive:
                     return False
                     
             else:
-                logger.warning(f"【{self.cookie_id}】密码登录失败，未获取到Cookie")
+                login_error = getattr(slider, 'last_login_error', '') or "密码登录失败，未获取到Cookie"
+                backoff_reason, backoff_seconds = XianyuLive.classify_password_login_failure(login_error)
+                XianyuLive.set_password_login_failure_backoff(self.cookie_id, backoff_reason, backoff_seconds)
+                logger.warning(f"【{self.cookie_id}】密码登录失败，未获取到Cookie: {login_error}")
+                logger.warning(f"【{self.cookie_id}】已进入失败退避期: {backoff_reason}, {backoff_seconds}秒")
                 return False
 
         except Exception as refresh_e:
+            backoff_reason, backoff_seconds = XianyuLive.classify_password_login_failure(str(refresh_e))
+            XianyuLive.set_password_login_failure_backoff(self.cookie_id, backoff_reason, backoff_seconds)
             logger.error(f"【{self.cookie_id}】Cookie刷新或实例重启失败: {self._safe_str(refresh_e)}")
             import traceback
             logger.error(f"【{self.cookie_id}】详细堆栈:\n{traceback.format_exc()}")
@@ -4949,8 +5224,11 @@ class XianyuLive:
         result = {
             'valid': True,
             'confirm_api': None,
+            'web_session_api': None,
             'image_api': None,
-            'details': []
+            'details': [],
+            'inconclusive': False,
+            'relogin_recommended': True
         }
         
         # 1. 测试确认发货API - 使用测试订单ID实际调用
@@ -5034,7 +5312,75 @@ class XianyuLive:
         #         result['confirm_api'] = True
         #         result['details'].append(f"确认发货API: 调用异常(可能非Cookie问题)")
         
-        # 2. 测试图片上传API - 创建测试图片并实际上传
+        # 2. 测试网页登录态 - 只读访问 IM 页面，检测是否被重定向到登录/验证页
+        try:
+            logger.info(f"【{self.cookie_id}】测试网页登录态（访问 IM 页面）...")
+
+            if not self.session:
+                connector = aiohttp.TCPConnector(limit=100, limit_per_host=30)
+                timeout = aiohttp.ClientTimeout(total=30)
+                self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+
+            async with self.session.get(
+                'https://www.goofish.com/im',
+                headers={
+                    'cookie': self.cookies_str,
+                    'Referer': 'https://www.goofish.com/',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                allow_redirects=True
+            ) as response:
+                final_url = str(response.url)
+                page_text = await response.text()
+
+                redirected_to_login = (
+                    'passport.goofish.com' in final_url or
+                    'mini_login' in final_url or
+                    ('mini_login.htm' in page_text and 'alibaba-login-box' in page_text)
+                )
+
+                if redirected_to_login or response.status in (401, 403):
+                    logger.warning(f"【{self.cookie_id}】❌ 网页登录态验证失败: 已进入登录/验证页 ({final_url})")
+                    result['web_session_api'] = False
+                    result['valid'] = False
+                    result['details'].append("网页登录态: 已重定向到登录/验证页")
+                elif response.status >= 500:
+                    logger.warning(f"【{self.cookie_id}】⚠️ 网页登录态验证遇到服务端异常: HTTP {response.status}")
+                    result['web_session_api'] = None
+                    result['inconclusive'] = True
+                    if result['valid']:
+                        result['relogin_recommended'] = False
+                    result['details'].append(f"网页登录态: 服务端异常，结果不确定 (HTTP {response.status})")
+                elif response.status == 200:
+                    logger.info(f"【{self.cookie_id}】✅ 网页登录态验证通过: {final_url}")
+                    result['web_session_api'] = True
+                    result['details'].append("网页登录态: 通过验证")
+                else:
+                    logger.warning(f"【{self.cookie_id}】⚠️ 网页登录态验证结果不明确: HTTP {response.status}, URL={final_url}")
+                    result['web_session_api'] = None
+                    result['inconclusive'] = True
+                    if result['valid']:
+                        result['relogin_recommended'] = False
+                    result['details'].append(f"网页登录态: 结果不明确 (HTTP {response.status})")
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            error_str = self._safe_str(e)
+            logger.warning(f"【{self.cookie_id}】⚠️ 网页登录态验证网络异常: {error_str}")
+            result['web_session_api'] = None
+            result['inconclusive'] = True
+            if result['valid']:
+                result['relogin_recommended'] = False
+            result['details'].append(f"网页登录态: 网络异常，结果不确定 ({error_str[:50]})")
+        except Exception as e:
+            error_str = self._safe_str(e)
+            logger.error(f"【{self.cookie_id}】网页登录态验证异常: {error_str}")
+            result['web_session_api'] = None
+            result['inconclusive'] = True
+            if result['valid']:
+                result['relogin_recommended'] = False
+            result['details'].append(f"网页登录态: 验证异常，结果不确定 - {error_str[:50]}")
+
+        # 3. 测试图片上传API - 创建测试图片并实际上传
         try:
             logger.info(f"【{self.cookie_id}】测试图片上传API（使用测试图片实际上传）...")
             
@@ -5074,12 +5420,28 @@ class XianyuLive:
                     result['image_api'] = True
                     result['details'].append("图片上传API: 通过验证")
                 else:
-                    # 上传失败，需要进一步判断原因
-                    # 如果是Cookie失效，通常会返回HTML登录页面
-                    logger.warning(f"【{self.cookie_id}】❌ 图片上传API验证失败: 上传失败（可能是Cookie失效）")
-                    result['image_api'] = False
-                    result['valid'] = False
-                    result['details'].append("图片上传API: 上传失败，可能Cookie已失效")
+                    error_type = getattr(uploader, 'last_error_type', None)
+                    error_message = getattr(uploader, 'last_error_message', None) or "未知原因"
+                    if error_type == 'network':
+                        logger.warning(f"【{self.cookie_id}】⚠️ 图片上传API验证遇到网络异常，不判定为Cookie失效: {error_message}")
+                        result['image_api'] = None
+                        result['inconclusive'] = True
+                        if result['valid']:
+                            result['relogin_recommended'] = False
+                        result['details'].append(f"图片上传API: 网络异常，结果不确定 ({error_message[:50]})")
+                    elif error_type == 'http' and getattr(uploader, 'last_http_status', None) and uploader.last_http_status >= 500:
+                        logger.warning(f"【{self.cookie_id}】⚠️ 图片上传API返回服务端异常，不判定为Cookie失效: HTTP {uploader.last_http_status}")
+                        result['image_api'] = None
+                        result['inconclusive'] = True
+                        if result['valid']:
+                            result['relogin_recommended'] = False
+                        result['details'].append(f"图片上传API: 服务端异常，结果不确定 (HTTP {uploader.last_http_status})")
+                    else:
+                        # 明确认证/会话异常才视为Cookie失效
+                        logger.warning(f"【{self.cookie_id}】❌ 图片上传API验证失败: {error_message}")
+                        result['image_api'] = False
+                        result['valid'] = False
+                        result['details'].append(f"图片上传API: {error_message[:50]}")
                 
             finally:
                 # 清理测试图片
@@ -5093,14 +5455,19 @@ class XianyuLive:
         except Exception as e:
             error_str = self._safe_str(e)
             logger.error(f"【{self.cookie_id}】图片上传API验证异常: {error_str}")
-            # 图片上传异常，标记为失败
-            result['image_api'] = False
-            result['valid'] = False
-            result['details'].append(f"图片上传API: 验证异常 - {error_str[:50]}")
+            # 上传校验异常可能是网络或环境问题，不直接判定为Cookie失效
+            result['image_api'] = None
+            result['inconclusive'] = True
+            if result['valid']:
+                result['relogin_recommended'] = False
+            result['details'].append(f"图片上传API: 验证异常，结果不确定 - {error_str[:50]}")
         
         # 汇总结果
         if result['valid']:
-            logger.info(f"【{self.cookie_id}】✅ Cookie验证通过: 所有关键API均可用")
+            if result['inconclusive']:
+                logger.warning(f"【{self.cookie_id}】⚠️ Cookie验证结果不确定: 未发现明确失效证据，但部分校验受网络影响")
+            else:
+                logger.info(f"【{self.cookie_id}】✅ Cookie验证通过: 所有关键API均可用")
         else:
             logger.warning(f"【{self.cookie_id}】❌ Cookie验证失败:")
             for detail in result['details']:
@@ -9230,6 +9597,11 @@ Cookie数量: {cookie_count}
                         await self._interruptible_sleep(300)  # 5分钟后再检查
                         continue
 
+                    if self.is_manual_refresh_active(self.cookie_id):
+                        logger.warning(f"【{self.cookie_id}】手动刷新进行中，跳过自动Cookie刷新")
+                        await self._interruptible_sleep(60)
+                        continue
+
                     current_time = time.time()
                     if current_time - self.last_cookie_refresh_time >= self.cookie_refresh_interval:
                         # 检查是否在消息接收后的冷却时间内
@@ -9275,6 +9647,11 @@ Cookie数量: {cookie_count}
         # 使用Lock确保原子性，防止重复执行
         async with self.cookie_refresh_lock:
             try:
+                clear_message_received_flag = False
+                if self.is_manual_refresh_active(self.cookie_id):
+                    logger.warning(f"【{self.cookie_id}】手动刷新进行中，取消当前自动Cookie刷新任务")
+                    return
+
                 logger.info(f"【{self.cookie_id}】开始Cookie刷新任务，暂时暂停心跳以避免连接冲突...")
 
                 # 暂时暂停心跳任务，避免与浏览器操作冲突
@@ -9306,22 +9683,31 @@ Cookie数量: {cookie_count}
                         
                         if not validation_result['valid']:
                             logger.warning(f"【{self.cookie_id}】❌ Cookie验证失败: {validation_result['details']}")
-                            logger.warning(f"【{self.cookie_id}】检测到Cookie可能无法用于关键API，尝试通过密码登录重新获取...")
-                            
-                            # 触发密码登录刷新
-                            password_refresh_success = await self._try_password_login_refresh("Cookie验证失败(关键API不可用)")
-                            
-                            if password_refresh_success:
-                                logger.info(f"【{self.cookie_id}】✅ 密码登录刷新成功，Cookie已更新")
+                            if validation_result.get('relogin_recommended', True):
+                                logger.warning(f"【{self.cookie_id}】检测到Cookie可能无法用于关键API，尝试通过密码登录重新获取...")
+                                
+                                # 触发密码登录刷新
+                                password_refresh_success = await self._try_password_login_refresh("Cookie验证失败(关键API不可用)")
+                                
+                                if password_refresh_success:
+                                    logger.info(f"【{self.cookie_id}】✅ 密码登录刷新成功，Cookie已更新")
+                                    clear_message_received_flag = True
+                                else:
+                                    logger.warning(f"【{self.cookie_id}】⚠️ 密码登录刷新失败，Cookie可能仍然无效")
+                                    # 发送通知
+                                    await self.send_token_refresh_notification(
+                                        f"Cookie验证失败且密码登录刷新也失败\n验证详情: {validation_result['details']}",
+                                        "cookie_validation_failed"
+                                    )
                             else:
-                                logger.warning(f"【{self.cookie_id}】⚠️ 密码登录刷新失败，Cookie可能仍然无效")
-                                # 发送通知
-                                await self.send_token_refresh_notification(
-                                    f"Cookie验证失败且密码登录刷新也失败\n验证详情: {validation_result['details']}",
-                                    "cookie_validation_failed"
-                                )
+                                logger.warning(f"【{self.cookie_id}】Cookie验证失败，但当前错误更像网络/环境问题，跳过密码登录刷新")
                         else:
-                            logger.info(f"【{self.cookie_id}】✅ Cookie验证通过: {validation_result['details']}")
+                            if validation_result.get('inconclusive'):
+                                logger.warning(f"【{self.cookie_id}】⚠️ Cookie验证结果不确定，但未发现明确失效证据: {validation_result['details']}")
+                                clear_message_received_flag = True
+                            else:
+                                logger.info(f"【{self.cookie_id}】✅ Cookie验证通过: {validation_result['details']}")
+                                clear_message_received_flag = True
                             
                     except Exception as verify_e:
                         logger.error(f"【{self.cookie_id}】Cookie验证过程异常: {self._safe_str(verify_e)}")
@@ -9346,9 +9732,12 @@ Cookie数量: {cookie_count}
                     logger.info(f"【{self.cookie_id}】Cookie刷新完成，心跳任务正常运行")
                     self.heartbeat_task = asyncio.create_task(self.heartbeat_loop(self.ws))
 
-                # 清空消息接收标志，允许下次正常执行Cookie刷新
-                self.last_message_received_time = 0
-                logger.warning(f"【{self.cookie_id}】Cookie刷新完成，已清空消息接收标志")
+                if clear_message_received_flag:
+                    # 仅在刷新链路确认恢复可用后，才清空消息接收标志。
+                    self.last_message_received_time = 0
+                    logger.warning(f"【{self.cookie_id}】Cookie刷新完成，已清空消息接收标志")
+                else:
+                    logger.warning(f"【{self.cookie_id}】Cookie刷新未确认恢复可用，保留消息接收标志")
 
 
 
@@ -9726,7 +10115,7 @@ Cookie数量: {cookie_count}
             except Exception as cleanup_e:
                 logger.warning(f"【{target_cookie_id}】清理浏览器资源时出错: {self._safe_str(cleanup_e)}")
 
-    async def _refresh_cookies_via_browser_page(self, current_cookies_str: str):
+    async def _refresh_cookies_via_browser_page(self, current_cookies_str: str, restart_on_success: bool = True):
         """使用当前cookie访问指定页面获取真实cookie并更新
         
         这是令牌过期时的备用刷新方案，类似于refresh_cookies_from_qr_login，
@@ -9734,6 +10123,7 @@ Cookie数量: {cookie_count}
 
         Args:
             current_cookies_str: 当前的cookie字符串
+            restart_on_success: 成功后是否立即重启任务。扫码登录后的首轮缓冲只需要稳定 Cookie，不应直接重启。
 
         Returns:
             bool: 成功返回True，失败返回False
@@ -9912,22 +10302,39 @@ Cookie数量: {cookie_count}
                     changed_cookies.append(name)
 
             if not changed_cookies and not new_cookies:
-                logger.warning(f"【{self.cookie_id}】Cookie无变化，可能当前cookie已失效")
-                return False
+                if restart_on_success:
+                    logger.warning(f"【{self.cookie_id}】Cookie无变化，可能当前cookie已失效")
+                    return False
+                logger.info(f"【{self.cookie_id}】Cookie字段无变化，但浏览器稳定化访问已完成")
 
             logger.info(f"【{self.cookie_id}】发生变化的Cookie字段 ({len(changed_cookies)}个): {', '.join(changed_cookies[:10])}")
             if new_cookies:
                 logger.info(f"【{self.cookie_id}】新增的Cookie字段 ({len(new_cookies)}个): {', '.join(new_cookies[:10])}")
 
-            # 更新Cookie并重启任务
-            logger.info(f"【{self.cookie_id}】开始更新Cookie并重启任务...")
-            update_success = await self._update_cookies_and_restart(real_cookies_str)
+            if restart_on_success:
+                # 更新Cookie并重启任务
+                logger.info(f"【{self.cookie_id}】开始更新Cookie并重启任务...")
+                update_success = await self._update_cookies_and_restart(real_cookies_str)
 
-            if update_success:
-                logger.info(f"【{self.cookie_id}】通过访问指定页面成功更新Cookie并重启任务")
+                if update_success:
+                    logger.info(f"【{self.cookie_id}】通过访问指定页面成功更新Cookie并重启任务")
+                    return True
+                else:
+                    logger.error(f"【{self.cookie_id}】更新Cookie或重启任务失败")
+                    return False
+
+            old_cookies_str = self.cookies_str
+            old_cookies_dict = self.cookies.copy()
+            try:
+                self.cookies_str = real_cookies_str
+                self.cookies = real_cookies_dict
+                await self.update_config_cookies()
+                logger.info(f"【{self.cookie_id}】通过访问指定页面成功稳定当前Cookie（不重启任务）")
                 return True
-            else:
-                logger.error(f"【{self.cookie_id}】更新Cookie或重启任务失败")
+            except Exception as update_e:
+                self.cookies_str = old_cookies_str
+                self.cookies = old_cookies_dict
+                logger.error(f"【{self.cookie_id}】稳定Cookie时更新数据库失败: {self._safe_str(update_e)}")
                 return False
 
         except Exception as e:
