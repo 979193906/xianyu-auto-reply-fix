@@ -14699,10 +14699,10 @@ function renderRiskControlSliderStats(stats = {}) {
     const hasData = Boolean(stats.has_data || totalSessions > 0);
     const recentSuccessText = formatBeijingDateTime(stats.recent_success);
     const recentFailureText = formatBeijingDateTime(stats.recent_failure);
-    let attemptSummary = '暂无结构化滑块会话统计';
+    let attemptSummary = stats.summary_text || '暂无滑块验证记录';
 
     if (hasData) {
-        attemptSummary = `累计结构化会话 ${totalSessions} 次`;
+        attemptSummary = `累计滑块相关记录 ${totalSessions} 次`;
         if (processingCount > 0) {
             attemptSummary += `，进行中 ${processingCount} 次`;
         }
@@ -14756,6 +14756,7 @@ async function loadRiskControlSliderStats(cookieId = '') {
             success_rate: 0,
             recent_success: '--',
             recent_failure: '--',
+            summary_text: '暂无滑块验证记录',
             has_data: false
         });
     } catch (error) {
@@ -14773,6 +14774,7 @@ async function loadRiskControlSliderStats(cookieId = '') {
             success_rate: 0,
             recent_success: '--',
             recent_failure: '--',
+            summary_text: '暂无滑块验证记录',
             has_data: false
         });
     }

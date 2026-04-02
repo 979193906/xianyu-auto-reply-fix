@@ -582,14 +582,14 @@ async def main():
 if __name__ == '__main__':
     # 避免使用被monkey patch的asyncio.run()
     # 使用原生的事件循环管理方式
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 如果事件循环已经在运行，创建任务
-            asyncio.create_task(main())
-        else:
-            # 正常启动事件循环
-            loop.run_until_complete(main())
-    except RuntimeError:
-        # 如果没有事件循环，创建一个新的
-        asyncio.run(main()) 
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        asyncio.set_event_loop(None)
+        loop.close()

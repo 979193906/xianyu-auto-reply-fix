@@ -8334,7 +8334,9 @@ Cookie数量: {cookie_count}
             'recent_success': None,
             'recent_failure': None,
             'accounts_with_sessions': 0,
+            'accounts_with_failures': 0,
             'stats_mode': 'session',
+            'summary_text': '暂无滑块验证记录',
         }
 
         def _normalize_cookie_ids(values: Optional[List[str]]) -> Optional[List[str]]:
@@ -8363,48 +8365,45 @@ Cookie数量: {cookie_count}
             with self.lock:
                 cursor = self.conn.cursor()
 
-                base_conditions = [
-                    "event_type = ?",
-                    "session_id IS NOT NULL",
-                    "trim(session_id) != ''",
-                ]
-                base_params: List[Any] = ['slider_captcha']
+                scope_conditions: List[str] = []
+                scope_params: List[Any] = []
 
                 if normalized_cookie_ids is not None:
                     placeholders = ', '.join(['?'] * len(normalized_cookie_ids))
-                    base_conditions.append(f"cookie_id IN ({placeholders})")
-                    base_params.extend(normalized_cookie_ids)
+                    scope_conditions.append(f"cookie_id IN ({placeholders})")
+                    scope_params.extend(normalized_cookie_ids)
 
-                where_clause = ' WHERE ' + ' AND '.join(base_conditions)
+                where_clause = ''
+                if scope_conditions:
+                    where_clause = ' WHERE ' + ' AND '.join(scope_conditions)
 
                 cursor.execute(
                     f'''
                     SELECT
-                        COUNT(*) AS total_sessions,
-                        COALESCE(SUM(CASE WHEN processing_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
-                        COALESCE(SUM(CASE WHEN processing_status = 'failed' THEN 1 ELSE 0 END), 0) AS failure_count,
-                        COALESCE(SUM(CASE WHEN processing_status = 'processing' THEN 1 ELSE 0 END), 0) AS processing_count,
-                        COUNT(DISTINCT cookie_id) AS accounts_with_sessions
+                        COALESCE(SUM(CASE WHEN event_type = 'slider_captcha' AND processing_status = 'success' THEN 1 ELSE 0 END), 0) AS success_count,
+                        COALESCE(SUM(CASE WHEN ((event_type = 'slider_captcha' AND processing_status = 'failed') OR result_code = 'password_login_slider_failed') THEN 1 ELSE 0 END), 0) AS failure_count,
+                        COALESCE(SUM(CASE WHEN event_type = 'slider_captcha' AND processing_status = 'processing' THEN 1 ELSE 0 END), 0) AS processing_count,
+                        COUNT(DISTINCT CASE WHEN (event_type = 'slider_captcha' OR result_code = 'password_login_slider_failed') THEN cookie_id END) AS accounts_with_sessions
                     FROM risk_control_logs
                     {where_clause}
                     ''',
-                    base_params,
+                    scope_params,
                 )
-                row = cursor.fetchone() or (0, 0, 0, 0, 0)
+                row = cursor.fetchone() or (0, 0, 0, 0)
 
-                total_sessions = int(row[0] or 0)
-                success_count = int(row[1] or 0)
-                failure_count = int(row[2] or 0)
-                processing_count = int(row[3] or 0)
-                accounts_with_sessions = int(row[4] or 0)
+                success_count = int(row[0] or 0)
+                failure_count = int(row[1] or 0)
+                processing_count = int(row[2] or 0)
+                accounts_with_sessions = int(row[3] or 0)
                 completed_sessions = success_count + failure_count
+                total_sessions = completed_sessions + processing_count
                 success_rate = round((success_count / completed_sessions) * 100, 1) if completed_sessions > 0 else 0.0
 
-                def _fetch_recent_datetime(status_value: str) -> Optional[str]:
-                    conditions = list(base_conditions)
-                    params = list(base_params)
-                    conditions.append("processing_status = ?")
-                    params.append(status_value)
+                def _fetch_recent_datetime(extra_condition: str, extra_params: List[Any]) -> Optional[str]:
+                    conditions = list(scope_conditions)
+                    params = list(scope_params)
+                    conditions.append(extra_condition)
+                    params.extend(extra_params)
                     recent_where = ' WHERE ' + ' AND '.join(conditions)
 
                     cursor.execute(
@@ -8420,6 +8419,11 @@ Cookie数量: {cookie_count}
                     row = cursor.fetchone()
                     return _format_datetime_text(row[0] if row else None)
 
+                if total_sessions > 0:
+                    summary_text = '已包含历史滑块成功/失败，并将账密刷新中的滑块失败计入失败次数'
+                else:
+                    summary_text = '暂无滑块验证记录'
+
                 return {
                     'has_data': total_sessions > 0,
                     'total_sessions': total_sessions,
@@ -8429,13 +8433,15 @@ Cookie数量: {cookie_count}
                     'processing_count': processing_count,
                     'completed_sessions': completed_sessions,
                     'success_rate': success_rate,
-                    'recent_success': _fetch_recent_datetime('success'),
-                    'recent_failure': _fetch_recent_datetime('failed'),
+                    'recent_success': _fetch_recent_datetime("event_type = ? AND processing_status = ?", ['slider_captcha', 'success']),
+                    'recent_failure': _fetch_recent_datetime("((event_type = ? AND processing_status = ?) OR result_code = ?)", ['slider_captcha', 'failed', 'password_login_slider_failed']),
                     'accounts_with_sessions': accounts_with_sessions,
+                    'accounts_with_failures': accounts_with_sessions,
                     'stats_mode': 'session',
+                    'summary_text': summary_text,
                 }
         except Exception as e:
-            logger.error(f"获取滑块验证会话统计失败: {e}")
+            logger.error(f"获取滑块验证统计失败: {e}")
             return dict(empty_stats)
 
     def delete_risk_control_log(self, log_id: int) -> bool:

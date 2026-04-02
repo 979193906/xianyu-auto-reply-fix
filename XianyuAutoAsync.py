@@ -5720,6 +5720,7 @@ class XianyuLive:
                 if redirected_to_login or response.status in (401, 403):
                     logger.warning(f"【{self.cookie_id}】❌ 网页登录态验证失败: 已进入登录/验证页 ({final_url})")
                     result['web_session_api'] = False
+                    result['valid'] = False
                     result['details'].append("网页登录态: 已重定向到登录/验证页")
                 elif response.status >= 500:
                     logger.warning(f"【{self.cookie_id}】⚠️ 网页登录态验证遇到服务端异常: HTTP {response.status}")
@@ -5795,7 +5796,7 @@ class XianyuLive:
 
                         error_type = getattr(uploader, 'last_error_type', None)
                         error_message = getattr(uploader, 'last_error_message', None) or "未知原因"
-                        is_retryable_auth = error_type == 'auth' and error_message == '返回登录页面'
+                        is_retryable_auth = error_type == 'auth' and error_message == '返回登录页面' and result['web_session_api'] is not False
                         if attempt == 0 and is_retryable_auth:
                             logger.warning(
                                 f"【{self.cookie_id}】图片上传校验首次返回登录页，但网页登录态仍可访问，1.5秒后重试一次"
@@ -5830,19 +5831,18 @@ class XianyuLive:
                         if result['valid']:
                             result['relogin_recommended'] = False
                         result['details'].append(f"图片上传API: 服务端异常，结果不确定 (HTTP {uploader.last_http_status})")
-                    elif error_type == 'auth' and error_message == '返回登录页面' and result['web_session_api'] is True:
+                    elif error_type == 'auth' and error_message == '返回登录页面':
                         logger.warning(
-                            f"【{self.cookie_id}】⚠️ 图片上传接口返回登录页，但IM网页登录态正常，按旧版保守策略暂不判定Cookie失效"
+                            f"【{self.cookie_id}】❌ 图片上传接口返回登录页，按旧版严格策略判定Cookie失效"
                         )
-                        result['image_api'] = None
-                        result['inconclusive'] = True
-                        if result['valid']:
-                            result['relogin_recommended'] = False
-                        result['details'].append("图片上传API: 返回登录页面，但网页登录态正常，结果不确定")
+                        result['image_api'] = False
+                        result['valid'] = False
+                        result['details'].append("图片上传API: 返回登录页面")
                     else:
                         # 明确认证/会话异常才视为Cookie失效
                         logger.warning(f"【{self.cookie_id}】❌ 图片上传API验证失败: {error_message}")
                         result['image_api'] = False
+                        result['valid'] = False
                         result['details'].append(f"图片上传API: {error_message[:50]}")
                 
             finally:
@@ -5857,21 +5857,27 @@ class XianyuLive:
         except Exception as e:
             error_str = self._safe_str(e)
             logger.error(f"【{self.cookie_id}】图片上传API验证异常: {error_str}")
-            # 上传校验异常可能是网络或环境问题，不直接判定为Cookie失效
-            result['image_api'] = None
-            result['inconclusive'] = True
-            if result['valid']:
-                result['relogin_recommended'] = False
-            result['details'].append(f"图片上传API: 验证异常，结果不确定 - {error_str[:50]}")
+            error_lower = error_str.lower()
+            auth_keywords = ['返回登录页面', 'session过期', '令牌过期', 'login', 'mini_login', 'passport.goofish.com']
+            if any(keyword.lower() in error_lower for keyword in auth_keywords):
+                result['image_api'] = False
+                result['valid'] = False
+                result['details'].append(f"图片上传API: 验证异常({error_str[:50]})")
+            else:
+                # 上传校验异常可能是网络或环境问题，不直接判定为Cookie失效
+                result['image_api'] = None
+                result['inconclusive'] = True
+                if result['valid']:
+                    result['relogin_recommended'] = False
+                result['details'].append(f"图片上传API: 验证异常，结果不确定 - {error_str[:50]}")
         
         if result['image_api'] is False:
             result['valid'] = False
         elif result['web_session_api'] is False and result['image_api'] is not True:
             result['valid'] = False
         elif result['web_session_api'] is False and result['image_api'] is True:
-            logger.warning(f"【{self.cookie_id}】⚠️ 网页登录态与图片上传校验结果不一致，按保守策略视为结果不确定")
-            result['inconclusive'] = True
-            result['relogin_recommended'] = False
+            logger.warning(f"【{self.cookie_id}】❌ 网页登录态与图片上传校验结果不一致，按严格策略判定Cookie失效")
+            result['valid'] = False
             result['details'].append("校验结果: 网页登录态与图片上传结果不一致")
 
         # 汇总结果
@@ -10189,8 +10195,7 @@ Cookie数量: {cookie_count}
                                 logger.warning(f"【{self.cookie_id}】Cookie验证失败，但当前错误更像网络/环境问题，跳过密码登录刷新")
                         else:
                             if validation_result.get('inconclusive'):
-                                logger.warning(f"【{self.cookie_id}】⚠️ Cookie验证结果不确定，但未发现明确失效证据: {validation_result['details']}")
-                                clear_message_received_flag = True
+                                logger.warning(f"【{self.cookie_id}】⚠️ Cookie验证结果不确定，保留当前消息冷却标志，等待后续保活再次确认: {validation_result['details']}")
                             else:
                                 logger.info(f"【{self.cookie_id}】✅ Cookie验证通过: {validation_result['details']}")
                                 clear_message_received_flag = True

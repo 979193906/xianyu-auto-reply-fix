@@ -2545,7 +2545,9 @@ def _empty_slider_session_stats() -> Dict[str, Any]:
         'recent_success': None,
         'recent_failure': None,
         'accounts_with_sessions': 0,
+        'accounts_with_failures': 0,
         'stats_mode': 'session',
+        'summary_text': '暂无滑块验证记录',
     }
 
 async def _execute_password_login(session_id: str, account_id: str, account: str, password: str, show_browser: bool, user_id: int, current_user: Dict[str, Any]):
@@ -7130,7 +7132,7 @@ async def get_slider_verification_stats(
     cookie_id: str = None,
     admin_user: Dict[str, Any] = Depends(require_admin)
 ):
-    """获取当前系统用户下的滑块验证会话统计。"""
+    """获取当前系统用户下的滑块验证统计。"""
     try:
         user_id = admin_user['user_id']
         user_cookie_ids = sorted(db_manager.get_all_cookies(user_id).keys())
@@ -7159,7 +7161,7 @@ async def get_slider_verification_stats(
 
         log_with_user(
             'info',
-            f"获取滑块验证会话统计成功: scope={scope_label}, sessions={stats['total_sessions']}, success_rate={stats['success_rate']}%",
+            f"获取滑块验证统计成功: scope={scope_label}, sessions={stats['total_sessions']}, success={stats['success_count']}, failure={stats['failure_count']}",
             admin_user,
         )
 
@@ -7168,10 +7170,10 @@ async def get_slider_verification_stats(
             'data': stats,
         }
     except Exception as e:
-        log_with_user('error', f"获取滑块验证会话统计失败: {str(e)}", admin_user)
+        log_with_user('error', f"获取滑块验证统计失败: {str(e)}", admin_user)
         return {
             'success': False,
-            'message': f'获取滑块验证会话统计失败: {str(e)}',
+            'message': f'获取滑块验证统计失败: {str(e)}',
             'data': _empty_slider_session_stats(),
         }
 
