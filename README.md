@@ -456,14 +456,16 @@ docker-deploy.bat
 
 ## 🧸 特别鸣谢
 
-本项目参考了以下开源项目：
-
+### 开源项目参考
 - **[xianyu-auto-reply](https://github.com/zhinianboke-new/xianyu-auto-reply)** - 提供了原始项目基础与二次开发起点
 - **[XianYuApis](https://github.com/cv-cat/XianYuApis)** - 提供了闲鱼 API 接口的技术参考
 - **[XianyuAutoAgent](https://github.com/shaxiu/XianyuAutoAgent)** - 提供了自动化处理的实现思路
 - **[myfish](https://github.com/Kaguya233qwq/myfish)** - 提供了扫码登录的实现思路
 
-感谢这些优秀的开源项目为本项目的开发提供了宝贵的参考和启发！
+### 开发者支持
+- **[syunnrai123](https://github.com/syunnrai123)** - 感谢其本人为当前项目的滑块处理方案提供思路与参考
+- **[Mangor2021](https://github.com/Mangor2021)** - 为项目开发与改进提供了实际贡献
+- **[82762294](https://github.com/82762294)** - 为项目开发与改进提供了实际贡献
 
 ## ⚖️ 版权声明与使用条款
 
@@ -494,7 +496,7 @@ docker-deploy.bat
 本项目按“现状”提供，不提供任何明示或暗示的保证；因使用本项目产生的风险、损失或责任，由使用者自行承担。
 
 ## Star History
-<a href="https://www.star-history.com/#shaxiu/XianyuAutoAgent&Date">
+<a href="https://www.star-history.com/#GuDong2003/xianyu-auto-reply-fix&Date">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=GuDong2003/xianyu-auto-reply-fix&type=Date&theme=dark" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=GuDong2003/xianyu-auto-reply-fix&type=Date" />
