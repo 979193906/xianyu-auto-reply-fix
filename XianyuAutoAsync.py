@@ -7834,36 +7834,44 @@ class XianyuLive:
         except Exception as e:
             logger.error(f"调试消息结构时发生错误: {self._safe_str(e)}")
 
-    async def get_default_reply(self, send_user_name: str, send_user_id: str, send_message: str, chat_id: str, item_id: str = None) -> str:
-        """获取默认回复内容，支持指定商品回复、变量替换和只回复一次功能"""
+    async def get_item_specific_reply(self, send_user_name: str, send_user_id: str, send_message: str, item_id: str = None) -> str:
+        """获取指定商品回复内容"""
+        if not item_id:
+            return None
+
         try:
             from db_manager import db_manager
 
-            # 1. 优先检查指定商品回复
-            if item_id:
-                item_reply = db_manager.get_item_reply(self.cookie_id, item_id)
-                if item_reply and item_reply.get('reply_content'):
-                    reply_content = item_reply['reply_content']
-                    logger.info(f"【{self.cookie_id}】使用指定商品回复: 商品ID={item_id}")
+            item_reply = db_manager.get_item_reply(self.cookie_id, item_id)
+            if not item_reply or not item_reply.get('reply_content'):
+                return None
 
-                    # 进行变量替换
-                    try:
-                        formatted_reply = reply_content.format(
-                            send_user_name=send_user_name,
-                            send_user_id=send_user_id,
-                            send_message=send_message,
-                            item_id=item_id
-                        )
-                        logger.info(f"【{self.cookie_id}】指定商品回复内容: {formatted_reply}")
-                        return formatted_reply
-                    except Exception as format_error:
-                        logger.error(f"指定商品回复变量替换失败: {self._safe_str(format_error)}")
-                        # 如果变量替换失败，返回原始内容
-                        return reply_content
-                else:
-                    logger.warning(f"【{self.cookie_id}】商品ID {item_id} 没有配置指定回复，使用默认回复")
+            reply_content = item_reply['reply_content']
+            logger.info(f"【{self.cookie_id}】使用指定商品回复: 商品ID={item_id}")
 
-            # 2. 获取当前账号的默认回复设置
+            try:
+                formatted_reply = reply_content.format(
+                    send_user_name=send_user_name,
+                    send_user_id=send_user_id,
+                    send_message=send_message,
+                    item_id=item_id
+                )
+                logger.info(f"【{self.cookie_id}】指定商品回复内容: {formatted_reply}")
+                return formatted_reply
+            except Exception as format_error:
+                logger.error(f"指定商品回复变量替换失败: {self._safe_str(format_error)}")
+                return reply_content
+
+        except Exception as e:
+            logger.error(f"获取指定商品回复失败: {self._safe_str(e)}")
+            return None
+
+    async def get_default_reply(self, send_user_name: str, send_user_id: str, send_message: str, chat_id: str, item_id: str = None) -> str:
+        """获取默认回复内容，支持变量替换和只回复一次功能"""
+        try:
+            from db_manager import db_manager
+
+            # 获取当前账号的默认回复设置
             default_reply_settings = db_manager.get_default_reply(self.cookie_id)
 
             if not default_reply_settings or not default_reply_settings.get('enabled', False):
@@ -7875,7 +7883,7 @@ class XianyuLive:
                 # 检查是否已经回复过这个chat_id
                 if db_manager.has_default_reply_record(self.cookie_id, chat_id):
                     logger.info(f"【{self.cookie_id}】chat_id {chat_id} 已使用过默认回复，跳过（只回复一次）")
-                    return None
+                    return "SKIP_REPLY"
 
             reply_content = default_reply_settings.get('reply_content', '')
             if not reply_content or (reply_content and reply_content.strip() == ''):
@@ -7884,17 +7892,11 @@ class XianyuLive:
 
             # 进行变量替换
             try:
-                # 获取当前商品是否有设置自动回复
-                item_replay = db_manager.get_item_replay(item_id)
-
                 formatted_reply = reply_content.format(
                     send_user_name=send_user_name,
                     send_user_id=send_user_id,
                     send_message=send_message
                 )
-
-                if item_replay:
-                    formatted_reply = item_replay.get('reply_content', '')
 
                 # 如果开启了"只回复一次"功能，记录这次回复
                 if default_reply_settings.get('reply_once', False) and chat_id:
@@ -13165,25 +13167,16 @@ class XianyuLive:
                 logger.info(f"[{msg_time}] 【{self.cookie_id}】【系统】chat_id {chat_id} 自动回复已暂停，剩余时间: {remaining_minutes}分{remaining_seconds}秒")
                 return
 
-            # 构造用户URL
-            user_url = f'https://www.goofish.com/personal?userId={send_user_id}'
-
             reply = None
-            # 判断是否启用API回复
-            if AUTO_REPLY.get('api', {}).get('enabled', False):
-                reply = await self.get_api_reply(
-                    msg_time, user_url, send_user_id, send_user_name,
-                    item_id, send_message, chat_id
-                )
-                if not reply:
-                    logger.error(f"[{msg_time}] 【API调用失败】用户: {send_user_name} (ID: {send_user_id}), 商品({item_id}): {send_message}")
+            reply_source = None
 
-            # 记录回复来源
-            reply_source = 'API'  # 默认假设是API回复
-
-            # 如果API回复失败或未启用API，按新的优先级顺序处理
-            if not reply:
-                # 1. 首先尝试关键词匹配（传入商品ID）
+            # 按 README 定义的优先级处理：
+            # 指定商品回复 > 商品专用关键词 > 通用关键词 > 默认回复 > AI回复
+            reply = await self.get_item_specific_reply(send_user_name, send_user_id, send_message, item_id)
+            if reply:
+                reply_source = '指定商品'
+            else:
+                # 1. 尝试关键词匹配（内部已区分商品专用关键词和通用关键词）
                 reply = await self.get_keyword_reply(send_user_name, send_user_id, send_message, item_id)
                 if reply == "EMPTY_REPLY":
                     # 匹配到关键词但回复内容为空，不进行任何回复
@@ -13192,18 +13185,21 @@ class XianyuLive:
                 elif reply:
                     reply_source = '关键词'  # 标记为关键词回复
                 else:
-                    # 2. 关键词匹配失败，如果AI开关打开，尝试AI回复
-                    reply = await self.get_ai_reply(send_user_name, send_user_id, send_message, item_id, chat_id)
-                    if reply:
-                        reply_source = 'AI'  # 标记为AI回复
+                    # 2. 关键词匹配失败后，使用默认回复兜底
+                    reply = await self.get_default_reply(send_user_name, send_user_id, send_message, chat_id, item_id)
+                    if reply == "EMPTY_REPLY":
+                        logger.info(f"[{msg_time}] 【{self.cookie_id}】默认回复内容为空，跳过自动回复")
+                        return
+                    elif reply == "SKIP_REPLY":
+                        logger.info(f"[{msg_time}] 【{self.cookie_id}】默认回复已命中过当前会话，跳过自动回复")
+                        return
+                    elif reply:
+                        reply_source = '默认'
                     else:
-                        # 3. 最后使用默认回复
-                        reply = await self.get_default_reply(send_user_name, send_user_id, send_message, chat_id, item_id)
-                        if reply == "EMPTY_REPLY":
-                            # 默认回复内容为空，不进行任何回复
-                            logger.info(f"[{msg_time}] 【{self.cookie_id}】默认回复内容为空，跳过自动回复")
-                            return
-                        reply_source = '默认'  # 标记为默认回复
+                        # 3. 最后尝试AI回复
+                        reply = await self.get_ai_reply(send_user_name, send_user_id, send_message, item_id, chat_id)
+                        if reply:
+                            reply_source = 'AI'
 
             # 注意：这里只有商品ID，没有标题和详情，根据新的规则不保存到数据库
             # 商品信息会在其他有完整信息的地方保存（如发货规则匹配时）
