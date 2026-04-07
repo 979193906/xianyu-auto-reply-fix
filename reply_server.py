@@ -32,6 +32,7 @@ from utils.time_utils import (
     get_local_now,
     local_date_to_utc_end_exclusive,
     local_date_to_utc_start,
+    parse_db_timestamp,
     utc_timestamp_to_local_date_string,
     utc_timestamp_to_local_datetime,
 )
@@ -130,6 +131,12 @@ SALES_ELIGIBLE_ORDER_STATUSES = {
     'shipped',
     'completed',
 }
+
+ORDER_SALES_TIME_SQL = "COALESCE(NULLIF(platform_paid_at, ''), NULLIF(platform_created_at, ''), created_at)"
+
+ORDER_HISTORY_SYNC_JOB_RETENTION_SECONDS = 3600
+order_history_sync_jobs: Dict[str, Dict[str, Any]] = {}
+order_history_sync_tasks: Dict[str, asyncio.Task] = {}
 
 
 def mask_sensitive_text(text: Any) -> str:
@@ -1356,20 +1363,23 @@ async def get_sales_data(
         
         # 构建查询
         placeholders = ','.join(['?'] * len(cookie_ids))
-        query = f"SELECT amount, created_at, order_status FROM orders WHERE cookie_id IN ({placeholders})"
+        query = (
+            f"SELECT amount, {ORDER_SALES_TIME_SQL} AS effective_sales_at, order_status "
+            f"FROM orders WHERE cookie_id IN ({placeholders})"
+        )
         params = list(cookie_ids)
         
         if start_date:
             utc_start = local_date_to_utc_start(start_date)
             if not utc_start:
                 raise HTTPException(status_code=400, detail='开始日期格式错误，应为 YYYY-MM-DD')
-            query += " AND created_at >= ?"
+            query += f" AND {ORDER_SALES_TIME_SQL} >= ?"
             params.append(utc_start)
         if end_date:
             utc_end_exclusive = local_date_to_utc_end_exclusive(end_date)
             if not utc_end_exclusive:
                 raise HTTPException(status_code=400, detail='结束日期格式错误，应为 YYYY-MM-DD')
-            query += " AND created_at < ?"
+            query += f" AND {ORDER_SALES_TIME_SQL} < ?"
             params.append(utc_end_exclusive)
         
         # 执行查询
@@ -1384,7 +1394,7 @@ async def get_sales_data(
 
         for order in orders:
             amount_str = order[0]
-            created_at = order[1]
+            effective_sales_at = order[1]
             order_status = order[2]
 
             if not is_sales_eligible_order_status(order_status):
@@ -1396,7 +1406,7 @@ async def get_sales_data(
                 skipped_invalid_amount += 1
                 continue
 
-            local_date = utc_timestamp_to_local_date_string(created_at)
+            local_date = utc_timestamp_to_local_date_string(effective_sales_at)
             if not local_date:
                 continue
 
@@ -1490,7 +1500,10 @@ async def get_sales_summary(
         # 单次查询获取所有数据，减少数据库访问
         placeholders = ','.join(['?'] * len(cookie_ids))
         month_start_utc = local_date_to_utc_start(month_start_str)
-        query = f"SELECT amount, created_at, order_status FROM orders WHERE created_at >= ? AND cookie_id IN ({placeholders})"
+        query = (
+            f"SELECT amount, {ORDER_SALES_TIME_SQL} AS effective_sales_at, order_status "
+            f"FROM orders WHERE {ORDER_SALES_TIME_SQL} >= ? AND cookie_id IN ({placeholders})"
+        )
         all_orders = db_manager.execute_query(query, [month_start_utc] + cookie_ids)
 
         # 计算销售额
@@ -1502,7 +1515,7 @@ async def get_sales_summary(
 
         for order in all_orders:
             amount_str = order[0]
-            created_at = order[1]
+            effective_sales_at = order[1]
             order_status = order[2]
 
             if not is_sales_eligible_order_status(order_status):
@@ -1514,17 +1527,17 @@ async def get_sales_summary(
                 skipped_invalid_amount += 1
                 continue
 
-            local_created_at = utc_timestamp_to_local_datetime(created_at)
-            if not local_created_at:
+            local_effective_sales_at = utc_timestamp_to_local_datetime(effective_sales_at)
+            if not local_effective_sales_at:
                 continue
 
-            if local_created_at >= month_start:
+            if local_effective_sales_at >= month_start:
                 month_sales += amount
 
-            if local_created_at >= week_start:
+            if local_effective_sales_at >= week_start:
                 week_sales += amount
 
-            if local_created_at >= today_start:
+            if local_effective_sales_at >= today_start:
                 today_sales += amount
 
         logger.info(
@@ -8701,6 +8714,418 @@ def update_item_multi_quantity_delivery(cookie_id: str, item_id: str, delivery_d
 
 # ==================== 订单管理接口 ====================
 
+class OrderHistorySyncRequest(BaseModel):
+    cookie_id: Optional[str] = None
+    start_date: str
+    end_date: str
+    max_orders: int = 120
+    fetch_details: bool = True
+
+
+def _normalize_history_optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
+def _normalize_history_amount_text(value: Any) -> Optional[str]:
+    text = _normalize_history_optional_text(value)
+    if not text:
+        return None
+    return text if parse_order_amount_value(text) is not None else None
+
+
+def _create_order_history_sync_job_snapshot(job: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'job_id': job.get('job_id'),
+        'status': job.get('status'),
+        'message': job.get('message'),
+        'error': job.get('error'),
+        'created_at': job.get('created_at'),
+        'started_at': job.get('started_at'),
+        'finished_at': job.get('finished_at'),
+        'request': job.get('request'),
+        'current_account': job.get('current_account'),
+        'current_order_id': job.get('current_order_id'),
+        'accounts_total': job.get('accounts_total', 0),
+        'accounts_completed': job.get('accounts_completed', 0),
+        'orders_discovered': job.get('orders_discovered', 0),
+        'orders_processed': job.get('orders_processed', 0),
+        'orders_saved': job.get('orders_saved', 0),
+        'orders_skipped': job.get('orders_skipped', 0),
+        'orders_failed': job.get('orders_failed', 0),
+        'matched_orders': job.get('matched_orders', 0),
+        'warnings': list(job.get('warnings') or []),
+    }
+
+
+def _append_order_history_sync_warning(job: Dict[str, Any], message: str) -> None:
+    warnings = job.setdefault('warnings', [])
+    if len(warnings) >= 20:
+        return
+    warnings.append(str(message))
+
+
+def _cleanup_order_history_sync_jobs() -> None:
+    now_ts = time.time()
+    expired_job_ids = []
+    for job_id, job in order_history_sync_jobs.items():
+        status_value = str(job.get('status') or '')
+        finished_ts = job.get('finished_ts') or 0
+        if status_value in {'completed', 'failed', 'cancelled'} and finished_ts and (now_ts - finished_ts) > ORDER_HISTORY_SYNC_JOB_RETENTION_SECONDS:
+            expired_job_ids.append(job_id)
+
+    for job_id in expired_job_ids:
+        order_history_sync_jobs.pop(job_id, None)
+        order_history_sync_tasks.pop(job_id, None)
+
+
+def _is_history_order_in_range(anchor_time: Optional[str], utc_start: str, utc_end_exclusive: str) -> bool:
+    anchor_dt = parse_db_timestamp(anchor_time) if anchor_time else None
+    start_dt = parse_db_timestamp(utc_start)
+    end_dt = parse_db_timestamp(utc_end_exclusive)
+    if not anchor_dt or not start_dt or not end_dt:
+        return False
+    return start_dt <= anchor_dt < end_dt
+
+
+def _save_history_order_candidate(cookie_id: str, candidate: Dict[str, Any]) -> bool:
+    order_status = _normalize_history_optional_text(candidate.get('order_status'))
+    normalized_status = normalize_order_status_value(order_status) if order_status else None
+
+    return db_manager.insert_or_update_order(
+        order_id=str(candidate.get('order_id') or '').strip(),
+        item_id=_normalize_history_optional_text(candidate.get('item_id')),
+        buyer_id=_normalize_history_optional_text(candidate.get('buyer_id')),
+        buyer_nick=_normalize_history_optional_text(candidate.get('buyer_nick')),
+        sid=_normalize_history_optional_text(candidate.get('sid')),
+        amount=_normalize_history_amount_text(candidate.get('amount')),
+        order_status=normalized_status,
+        cookie_id=cookie_id,
+        platform_created_at=_normalize_history_optional_text(candidate.get('platform_created_at')),
+        platform_paid_at=_normalize_history_optional_text(candidate.get('platform_paid_at')),
+        platform_completed_at=_normalize_history_optional_text(candidate.get('platform_completed_at')),
+    )
+
+
+def _save_history_order_detail_result(cookie_id: str, candidate: Dict[str, Any], result: Dict[str, Any]) -> bool:
+    order_id = _normalize_history_optional_text(result.get('order_id')) or _normalize_history_optional_text(candidate.get('order_id'))
+    if not order_id:
+        return False
+
+    raw_status = _normalize_history_optional_text(result.get('order_status'))
+    normalized_status = normalize_order_status_value(raw_status) if raw_status and raw_status.lower() != 'unknown' else None
+
+    return db_manager.insert_or_update_order(
+        order_id=order_id,
+        item_id=_normalize_history_optional_text(result.get('item_id')) or _normalize_history_optional_text(candidate.get('item_id')),
+        buyer_id=_normalize_history_optional_text(candidate.get('buyer_id')),
+        buyer_nick=_normalize_history_optional_text(candidate.get('buyer_nick')),
+        sid=_normalize_history_optional_text(candidate.get('sid')),
+        spec_name=_normalize_history_optional_text(result.get('spec_name')),
+        spec_value=_normalize_history_optional_text(result.get('spec_value')),
+        spec_name_2=_normalize_history_optional_text(result.get('spec_name_2')),
+        spec_value_2=_normalize_history_optional_text(result.get('spec_value_2')),
+        quantity=_normalize_history_optional_text(result.get('quantity')),
+        amount=_normalize_history_amount_text(result.get('amount')) or _normalize_history_amount_text(candidate.get('amount')),
+        order_status=normalized_status,
+        cookie_id=cookie_id,
+        platform_created_at=_normalize_history_optional_text(result.get('platform_created_at')) or _normalize_history_optional_text(candidate.get('platform_created_at')),
+        platform_paid_at=_normalize_history_optional_text(result.get('platform_paid_at')) or _normalize_history_optional_text(candidate.get('platform_paid_at')),
+        platform_completed_at=_normalize_history_optional_text(result.get('platform_completed_at')) or _normalize_history_optional_text(candidate.get('platform_completed_at')),
+    )
+
+
+async def _run_order_history_sync_job(job_id: str) -> None:
+    job = order_history_sync_jobs.get(job_id)
+    if not job:
+        return
+
+    request_data = dict(job.get('request') or {})
+    user_info = dict(job.get('user_info') or {})
+    current_user_id = user_info.get('user_id')
+
+    from utils.order_history_sync import OrderHistoryPageFetcher
+
+    try:
+        utc_start = local_date_to_utc_start(request_data.get('start_date'))
+        utc_end_exclusive = local_date_to_utc_end_exclusive(request_data.get('end_date'))
+        if not utc_start or not utc_end_exclusive:
+            raise ValueError('日期格式错误，应为 YYYY-MM-DD')
+        if utc_start >= utc_end_exclusive:
+            raise ValueError('开始日期必须早于结束日期')
+
+        max_orders = int(request_data.get('max_orders') or 120)
+        max_orders = min(max(max_orders, 1), 500)
+        fetch_details = bool(request_data.get('fetch_details', True))
+
+        user_cookies = db_manager.get_all_cookies(current_user_id)
+        selected_cookie_id = _normalize_history_optional_text(request_data.get('cookie_id'))
+        if selected_cookie_id:
+            if selected_cookie_id not in user_cookies:
+                raise ValueError('指定账号不存在或无权限访问')
+            target_cookie_ids = [selected_cookie_id]
+        else:
+            target_cookie_ids = list(user_cookies.keys())
+
+        if not target_cookie_ids:
+            raise ValueError('当前没有可同步的账号')
+
+        _cleanup_order_history_sync_jobs()
+
+        job.update({
+            'status': 'running',
+            'message': '开始同步历史订单',
+            'error': None,
+            'started_at': get_local_now().strftime('%Y-%m-%d %H:%M:%S'),
+            'accounts_total': len(target_cookie_ids),
+            'accounts_completed': 0,
+            'orders_discovered': 0,
+            'orders_processed': 0,
+            'orders_saved': 0,
+            'orders_skipped': 0,
+            'orders_failed': 0,
+            'matched_orders': 0,
+            'warnings': [],
+        })
+
+        for account_index, cookie_id in enumerate(target_cookie_ids, start=1):
+            if job.get('status') == 'cancelled':
+                return
+
+            remaining_limit = max_orders - int(job.get('orders_discovered') or 0)
+            if remaining_limit <= 0:
+                break
+
+            cookie_string = user_cookies.get(cookie_id)
+            if not cookie_string:
+                _append_order_history_sync_warning(job, f'账号 {cookie_id} 缺少 Cookie，已跳过')
+                job['accounts_completed'] = account_index
+                continue
+
+            job['current_account'] = cookie_id
+            job['current_order_id'] = None
+            job['message'] = f'正在抓取账号 {cookie_id} 的历史订单列表'
+
+            history_fetcher = OrderHistoryPageFetcher(cookie_string, cookie_id_for_log=cookie_id, headless=True)
+            live_instance = cookie_manager.manager.get_xianyu_instance(cookie_id) if cookie_manager.manager else None
+
+            try:
+                candidates = await history_fetcher.fetch_recent_orders(max_orders=remaining_limit)
+                job['orders_discovered'] += len(candidates)
+
+                if live_instance is not None:
+                    await history_fetcher.close()
+
+                if job.get('status') == 'cancelled':
+                    return
+
+                if not candidates:
+                    _append_order_history_sync_warning(job, f'账号 {cookie_id} 未抓到历史订单候选')
+                    job['accounts_completed'] = account_index
+                    continue
+
+                for candidate in candidates:
+                    if job.get('status') == 'cancelled':
+                        return
+
+                    order_id = _normalize_history_optional_text(candidate.get('order_id'))
+                    if not order_id:
+                        continue
+
+                    candidate_anchor_time = _normalize_history_optional_text(candidate.get('platform_created_at'))
+                    in_range = _is_history_order_in_range(candidate_anchor_time, utc_start, utc_end_exclusive)
+                    if not in_range:
+                        job['orders_skipped'] += 1
+                        continue
+
+                    job['current_order_id'] = order_id
+                    job['matched_orders'] += 1
+                    job['orders_processed'] += 1
+                    job['message'] = f'正在同步账号 {cookie_id} 的订单 {order_id}'
+
+                    detail_saved = False
+                    detail_result = None
+
+                    if fetch_details:
+                        try:
+                            if live_instance is not None:
+                                detail_result = await live_instance.fetch_order_detail_info(
+                                    order_id=order_id,
+                                    item_id=_normalize_history_optional_text(candidate.get('item_id')),
+                                    buyer_id=_normalize_history_optional_text(candidate.get('buyer_id')),
+                                    sid=_normalize_history_optional_text(candidate.get('sid')),
+                                    force_refresh=True,
+                                    buyer_nick=_normalize_history_optional_text(candidate.get('buyer_nick')),
+                                    buyer_id_source='history_sync',
+                                )
+                                detail_saved = bool(detail_result)
+                            else:
+                                detail_result = await history_fetcher.fetch_order_detail(order_id, force_refresh=True)
+                                if detail_result:
+                                    detail_saved = _save_history_order_detail_result(cookie_id, candidate, detail_result)
+                        except Exception as sync_exc:
+                            logger.warning(f"历史订单详情同步失败: cookie_id={cookie_id}, order_id={order_id}, error={sync_exc}")
+                            _append_order_history_sync_warning(job, f'订单 {order_id} 详情刷新失败: {sync_exc}')
+
+                    if not fetch_details or not detail_saved:
+                        if _save_history_order_candidate(cookie_id, candidate):
+                            detail_saved = True
+                        else:
+                            _append_order_history_sync_warning(job, f'订单 {order_id} 基础信息写库失败')
+
+                    if detail_saved:
+                        job['orders_saved'] += 1
+                    else:
+                        job['orders_skipped'] += 1
+                        job['orders_failed'] += 1
+
+                job['accounts_completed'] = account_index
+            finally:
+                await history_fetcher.close()
+
+        job['status'] = 'completed'
+        job['message'] = (
+            f"历史订单同步完成，共发现 {job.get('orders_discovered', 0)} 单，"
+            f"命中时间范围 {job.get('matched_orders', 0)} 单，入库/更新 {job.get('orders_saved', 0)} 单"
+        )
+    except asyncio.CancelledError:
+        logger.info(f"历史订单同步任务已取消: {job_id}")
+        job['status'] = 'cancelled'
+        job['error'] = None
+        job['message'] = job.get('message') or '历史订单同步已取消'
+    except Exception as exc:
+        logger.error(f"历史订单同步任务失败: {exc}")
+        job['status'] = 'failed'
+        job['error'] = str(exc)
+        job['message'] = f'历史订单同步失败: {exc}'
+    finally:
+        job['current_order_id'] = None
+        job['current_account'] = None
+        job['finished_at'] = get_local_now().strftime('%Y-%m-%d %H:%M:%S')
+        job['finished_ts'] = time.time()
+
+
+@app.post('/api/orders/history-sync')
+async def start_order_history_sync(request: OrderHistorySyncRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """按时间范围同步历史订单。"""
+    try:
+        request_data = request.dict()
+        start_date = str(request_data.get('start_date') or '').strip()
+        end_date = str(request_data.get('end_date') or '').strip()
+        if not start_date or not end_date:
+            raise HTTPException(status_code=400, detail='开始日期和结束日期不能为空')
+
+        cookie_id = _normalize_history_optional_text(request_data.get('cookie_id'))
+        max_orders = min(max(int(request_data.get('max_orders') or 120), 1), 500)
+        fetch_details = bool(request_data.get('fetch_details', True))
+
+        _cleanup_order_history_sync_jobs()
+
+        job_id = f"history_sync_{secrets.token_hex(8)}"
+        created_at = get_local_now().strftime('%Y-%m-%d %H:%M:%S')
+        job = {
+            'job_id': job_id,
+            'status': 'pending',
+            'message': '历史订单同步任务已创建，等待执行',
+            'error': None,
+            'created_at': created_at,
+            'started_at': None,
+            'finished_at': None,
+            'finished_ts': None,
+            'request': {
+                'cookie_id': cookie_id,
+                'start_date': start_date,
+                'end_date': end_date,
+                'max_orders': max_orders,
+                'fetch_details': fetch_details,
+            },
+            'user_id': current_user['user_id'],
+            'user_info': {
+                'user_id': current_user['user_id'],
+                'username': current_user.get('username'),
+            },
+            'current_account': None,
+            'current_order_id': None,
+            'accounts_total': 0,
+            'accounts_completed': 0,
+            'orders_discovered': 0,
+            'orders_processed': 0,
+            'orders_saved': 0,
+            'orders_skipped': 0,
+            'orders_failed': 0,
+            'matched_orders': 0,
+            'warnings': [],
+        }
+        order_history_sync_jobs[job_id] = job
+
+        task = asyncio.create_task(_run_order_history_sync_job(job_id))
+        order_history_sync_tasks[job_id] = task
+
+        def _on_task_done(done_task: asyncio.Task) -> None:
+            order_history_sync_tasks.pop(job_id, None)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as task_exc:
+                logger.error(f"历史订单同步后台任务异常: job_id={job_id}, error={task_exc}")
+
+        task.add_done_callback(_on_task_done)
+
+        log_with_user(
+            'info',
+            f"创建历史订单同步任务: job_id={job_id}, cookie_id={cookie_id or 'ALL'}, range={start_date}~{end_date}, max_orders={max_orders}, fetch_details={fetch_details}",
+            current_user
+        )
+        return {"success": True, "data": _create_order_history_sync_job_snapshot(job)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_with_user('error', f"创建历史订单同步任务失败: {exc}", current_user)
+        raise HTTPException(status_code=500, detail=f"创建历史订单同步任务失败: {exc}")
+
+
+@app.get('/api/orders/history-sync/{job_id}')
+def get_order_history_sync_status(job_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """查询历史订单同步任务状态。"""
+    _cleanup_order_history_sync_jobs()
+
+    job = order_history_sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='历史订单同步任务不存在或已过期')
+    if job.get('user_id') != current_user['user_id']:
+        raise HTTPException(status_code=403, detail='无权访问该历史订单同步任务')
+
+    return {"success": True, "data": _create_order_history_sync_job_snapshot(job)}
+
+
+@app.post('/api/orders/history-sync/{job_id}/cancel')
+def cancel_order_history_sync(job_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """取消历史订单同步任务。"""
+    job = order_history_sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='历史订单同步任务不存在或已过期')
+    if job.get('user_id') != current_user['user_id']:
+        raise HTTPException(status_code=403, detail='无权取消该历史订单同步任务')
+
+    if str(job.get('status') or '') in {'completed', 'failed', 'cancelled'}:
+        return {"success": True, "data": _create_order_history_sync_job_snapshot(job)}
+
+    job['status'] = 'cancelled'
+    job['error'] = None
+    job['message'] = '历史订单同步已取消'
+    job['finished_at'] = get_local_now().strftime('%Y-%m-%d %H:%M:%S')
+    job['finished_ts'] = time.time()
+
+    task = order_history_sync_tasks.get(job_id)
+    if task and not task.done():
+        task.cancel()
+
+    return {"success": True, "data": _create_order_history_sync_job_snapshot(job)}
+
+
 @app.get('/api/orders')
 def get_user_orders(current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取当前用户的订单信息"""
@@ -8722,8 +9147,11 @@ def get_user_orders(current_user: Dict[str, Any] = Depends(get_current_user)):
                 order['cookie_id'] = cookie_id
                 all_orders.append(order)
 
-        # 按创建时间倒序排列
-        all_orders.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        # 历史订单补录后优先按平台下单时间展示，回退到本地入库时间
+        all_orders.sort(
+            key=lambda x: x.get('platform_created_at') or x.get('created_at') or '',
+            reverse=True
+        )
 
         log_with_user('info', f"用户订单查询成功，共 {len(all_orders)} 条记录", current_user)
         return {"success": True, "data": all_orders}
