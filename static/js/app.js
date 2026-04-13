@@ -4499,6 +4499,7 @@ async function editCookieInline(id, currentValue) {
 async function openAccountEditModal(accountData) {
     // 设置模态框数据
     document.getElementById('accountEditId').value = accountData.id;
+    document.getElementById('editAccountRemark').value = accountData.remark || '';
     document.getElementById('editAccountCookie').value = accountData.value || '';
     document.getElementById('editAccountUsername').value = accountData.username || '';
     document.getElementById('editAccountPassword').value = accountData.password || '';
@@ -4556,6 +4557,7 @@ function toggleProxyFields() {
 // 保存账号编辑
 async function saveAccountEdit() {
     const id = document.getElementById('accountEditId').value;
+    const remark = document.getElementById('editAccountRemark').value.trim();
     const cookie = document.getElementById('editAccountCookie').value.trim();
     const username = document.getElementById('editAccountUsername').value.trim();
     const password = document.getElementById('editAccountPassword').value.trim();
@@ -4599,6 +4601,15 @@ async function saveAccountEdit() {
                 show_browser: showBrowser
             })
         });
+
+        // 保存备注名称
+        if (remark !== undefined) {
+            await fetchJSON(apiBase + `/cookies/${id}/remark`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ remark: remark })
+            });
+        }
         
         // 保存代理配置
         await fetchJSON(apiBase + `/cookie/${id}/proxy`, {
@@ -19373,14 +19384,12 @@ function filterChatSessions() {
 async function selectChatSession(session) {
     chatCurrentChatId = session.chat_id;
     chatUnreadCounts[session.chat_id] = 0;
+    // 立即重新渲染会话列表以清除红色角标
+    renderChatSessions(chatSessionsCache);
     chatCurrentToUserId = session.buyer_id || (session.direction === 2 ? (session.sender_id || '') : '');
     chatCurrentSenderName = session.buyer_name || (session.direction === 2 ? (session.sender_name || session.sender_id || session.chat_id) : (session.sender_name || session.chat_id));
     chatCurrentItemId = session.item_id || '';
     chatOldestMsgId = null;
-
-    document.querySelectorAll('.chat-session-item').forEach(el => {
-        el.classList.toggle('active', el.querySelector('.chat-session-info')?.querySelector('.chat-session-name')?.textContent === chatCurrentSenderName);
-    });
 
     const placeholder = document.getElementById('chatMainPlaceholder');
     const active = document.getElementById('chatActiveArea');
@@ -20049,13 +20058,57 @@ function formatChatTime(ts) {
 
 // === 入口 ===
 function loadOnlineIm() {
-    refreshChatAccounts();
+    refreshChatAccounts().then(() => {
+        // 自动选择第一个账号并打开首个未读/第一个会话
+        autoSelectFirstUnreadChat();
+    });
     initChatSSE();
     // 初始化消息提示音（使用 Web Audio API 生成简短提示音）
     try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) chatNotificationSound = new AudioCtx();
     } catch(e) {}
+}
+
+async function autoSelectFirstUnreadChat() {
+    try {
+        const resp = await fetch(`${apiBase}/api/chat/accounts`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const result = await resp.json();
+        if (!result.success) return;
+        const accounts = result.accounts || [];
+        if (accounts.length === 0) return;
+
+        // 查找有未读消息的账号和会话
+        for (const account of accounts) {
+            const sessResp = await fetch(`${apiBase}/api/chat/sessions?cookie_id=${encodeURIComponent(account.id)}`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const sessResult = await sessResp.json();
+            if (!sessResult.success) continue;
+            const sessions = sessResult.sessions || [];
+            if (sessions.length === 0) continue;
+
+            // 查找有未读的会话
+            const unreadSession = sessions.find(s => (chatUnreadCounts[s.chat_id] || 0) > 0);
+            if (unreadSession) {
+                await selectChatAccount(account.id);
+                await selectChatSession(unreadSession);
+                return;
+            }
+        }
+
+        // 没有未读，打开第一个账号的第一个会话
+        const firstAccountId = accounts[0].id;
+        await selectChatAccount(firstAccountId);
+        // 等会话列表加载完
+        if (chatSessionsCache.length > 0) {
+            await selectChatSession(chatSessionsCache[0]);
+        }
+    } catch (e) {
+        console.error('自动打开会话失败:', e);
+    }
 }
 
 function playChatNotificationSound() {

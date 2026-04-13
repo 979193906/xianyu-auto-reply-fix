@@ -13968,26 +13968,27 @@ class XianyuLive:
 
             if send_user_id == self.myid and not is_system_message:
                 logger.info(f"[{msg_time}] 【{self.cookie_id}】[{msg_id}] 【手动发出】 商品({item_id}): {send_message}")
-                # 保存手动发出的消息到数据库并推送SSE事件
-                try:
-                    from db_manager import db_manager as _db
-                    from chat_event_hub import publish_chat_message
-                    _msg_id_db = _db.save_chat_message(
-                        cookie_id=self.cookie_id, chat_id=chat_id,
-                        sender_id=self.myid, sender_name=self.cookie_id,
-                        content=send_message, content_type=content_type,
-                        image_url=self._extract_image_url_from_message(message) if content_type == 2 else None,
-                        item_id=item_id, direction=1, reply_source='手动'
-                    )
-                    publish_chat_message(self.cookie_id, {
-                        "msg_id": _msg_id_db, "chat_id": chat_id,
-                        "sender_id": self.myid, "sender_name": self.cookie_id,
-                        "content": send_message, "content_type": content_type,
-                        "image_url": self._extract_image_url_from_message(message) if content_type == 2 else None,
-                        "item_id": item_id, "direction": 1, "reply_source": "手动",
-                    })
-                except Exception as _e:
-                    logger.debug(f"保存/推送手动消息失败: {self._safe_str(_e)}")
+                # 保存手动发出的消息到数据库并推送SSE事件（群消息不保存）
+                if not is_group_message:
+                    try:
+                        from db_manager import db_manager as _db
+                        from chat_event_hub import publish_chat_message
+                        _msg_id_db = _db.save_chat_message(
+                            cookie_id=self.cookie_id, chat_id=chat_id,
+                            sender_id=self.myid, sender_name=self.cookie_id,
+                            content=send_message, content_type=content_type,
+                            image_url=self._extract_image_url_from_message(message) if content_type == 2 else None,
+                            item_id=item_id, direction=1, reply_source='手动'
+                        )
+                        publish_chat_message(self.cookie_id, {
+                            "msg_id": _msg_id_db, "chat_id": chat_id,
+                            "sender_id": self.myid, "sender_name": self.cookie_id,
+                            "content": send_message, "content_type": content_type,
+                            "image_url": self._extract_image_url_from_message(message) if content_type == 2 else None,
+                            "item_id": item_id, "direction": 1, "reply_source": "手动",
+                        })
+                    except Exception as _e:
+                        logger.debug(f"保存/推送手动消息失败: {self._safe_str(_e)}")
 
                 # 暂停该chat_id的自动回复10分钟
                 pause_manager.pause_chat(chat_id, self.cookie_id)
@@ -14001,26 +14002,27 @@ class XianyuLive:
                 )
             else:
                 logger.info(f"[{msg_time}] 【收到】用户: {send_user_name} (ID: {send_user_id}), 商品({item_id}): {send_message}")
-                # 保存收到的消息到数据库并推送SSE事件
-                try:
-                    from db_manager import db_manager as _db
-                    from chat_event_hub import publish_chat_message
-                    _msg_id_db = _db.save_chat_message(
-                        cookie_id=self.cookie_id, chat_id=chat_id,
-                        sender_id=send_user_id, sender_name=send_user_name,
-                        content=send_message, content_type=content_type,
-                        image_url=self._extract_image_url_from_message(message) if content_type == 2 else None,
-                        item_id=item_id, direction=2
-                    )
-                    publish_chat_message(self.cookie_id, {
-                        "msg_id": _msg_id_db, "chat_id": chat_id,
-                        "sender_id": send_user_id, "sender_name": send_user_name,
-                        "content": send_message, "content_type": content_type,
-                        "image_url": self._extract_image_url_from_message(message) if content_type == 2 else None,
-                        "item_id": item_id, "direction": 2,
-                    })
-                except Exception as _e:
-                    logger.debug(f"保存/推送聊天消息失败: {self._safe_str(_e)}")
+                # 保存收到的消息到数据库并推送SSE事件（群消息不保存）
+                if not is_group_message:
+                    try:
+                        from db_manager import db_manager as _db
+                        from chat_event_hub import publish_chat_message
+                        _msg_id_db = _db.save_chat_message(
+                            cookie_id=self.cookie_id, chat_id=chat_id,
+                            sender_id=send_user_id, sender_name=send_user_name,
+                            content=send_message, content_type=content_type,
+                            image_url=self._extract_image_url_from_message(message) if content_type == 2 else None,
+                            item_id=item_id, direction=2
+                        )
+                        publish_chat_message(self.cookie_id, {
+                            "msg_id": _msg_id_db, "chat_id": chat_id,
+                            "sender_id": send_user_id, "sender_name": send_user_name,
+                            "content": send_message, "content_type": content_type,
+                            "image_url": self._extract_image_url_from_message(message) if content_type == 2 else None,
+                            "item_id": item_id, "direction": 2,
+                        })
+                    except Exception as _e:
+                        logger.debug(f"保存/推送聊天消息失败: {self._safe_str(_e)}")
                 if message_route == 'user_chat':
                     self.last_user_chat_time = time.time()
 

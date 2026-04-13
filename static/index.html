@@ -4943,7 +4943,13 @@
         <div class="modal-body">
           <form id="accountEditForm">
             <input type="hidden" id="accountEditId">
-            
+
+            <div class="mb-3">
+              <label class="form-label">备注名称</label>
+              <input type="text" class="form-control" id="editAccountRemark" placeholder="给账号起个名字，方便识别">
+              <div class="form-text">自定义账号名称，会显示在账号列表和在线客服中</div>
+            </div>
+
             <div class="mb-3">
               <label class="form-label">Cookie <span class="text-danger">*</span></label>
               <textarea class="form-control" id="editAccountCookie" rows="3" placeholder="输入Cookie值" required></textarea>
