@@ -2548,14 +2548,25 @@
                       <small class="text-muted ms-2" id="chatHeaderItemId"></small>
                     </div>
                     <div class="d-flex gap-1">
+                      <button class="btn btn-sm btn-outline-secondary" onclick="toggleQuickReplyBar()" title="快捷短语"><i class="bi bi-lightning"></i></button>
                       <button class="btn btn-sm btn-outline-secondary" onclick="loadMoreChatMessages()" title="加载更多"><i class="bi bi-clock-history"></i></button>
                       <button class="btn btn-sm btn-outline-primary" onclick="toggleReplyPanel()" title="商品回复" id="btnToggleReply"><i class="bi bi-chat-right-text"></i></button>
                     </div>
                   </div>
                   <div class="chat-messages-area" id="chatMessagesArea"></div>
+                  <!-- 快捷回复栏 -->
+                  <div id="chatQuickReplyBar" class="chat-quick-reply-bar d-none">
+                    <div class="chat-quick-reply-header">
+                      <span class="fw-bold small">快捷短语</span>
+                      <button class="btn btn-sm p-0 border-0" onclick="toggleQuickReplyBar()" title="收起"><i class="bi bi-chevron-down"></i></button>
+                    </div>
+                    <div id="chatQuickReplyList" class="chat-quick-reply-list">
+                      <div class="text-muted small">暂无快捷短语</div>
+                    </div>
+                  </div>
                   <div class="chat-input-area border-top p-2">
                     <div class="d-flex gap-2">
-                      <textarea class="form-control form-control-sm" id="chatInputBox" rows="2" placeholder="输入消息... (Enter发送, Shift+Enter换行)" onkeydown="handleChatInputKeydown(event)"></textarea>
+                      <textarea class="form-control form-control-sm" id="chatInputBox" rows="4" placeholder="输入消息... (Enter发送, Shift+Enter换行)" style="min-height:80px;" onkeydown="handleChatInputKeydown(event)"></textarea>
                       <button class="btn btn-primary btn-sm align-self-end" onclick="sendChatMessage()" id="chatSendBtn" style="min-width: 60px;">发送</button>
                     </div>
                   </div>

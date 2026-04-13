@@ -9784,7 +9784,9 @@ class ChatSendRequest(BaseModel):
     cookie_id: str
     chat_id: str
     to_user_id: str
-    message: str
+    message: str = ''
+    content_type: int = 1  # 1=text, 2=image
+    image_url: str = ''  # 本地图片URL（已上传到服务器的）
 
 
 @app.post('/api/chat/send')
@@ -9805,13 +9807,28 @@ async def chat_send_message(
         if not live_instance.ws:
             raise HTTPException(status_code=400, detail="WebSocket连接未就绪")
 
-        await _run_live_instance_on_manager_loop(
-            cookie_id,
-            lambda: live_instance.send_msg(
-                live_instance.ws, req.chat_id, req.to_user_id, req.message
-            ),
-            timeout=15,
-        )
+        if req.content_type == 2 and req.image_url:
+            # 发送图片消息
+            await _run_live_instance_on_manager_loop(
+                cookie_id,
+                lambda: live_instance.send_image_msg(
+                    live_instance.ws, req.chat_id, req.to_user_id, req.image_url
+                ),
+                timeout=30,
+            )
+            save_content = '[图片]'
+            save_image_url = req.image_url
+        else:
+            # 发送文本消息
+            await _run_live_instance_on_manager_loop(
+                cookie_id,
+                lambda: live_instance.send_msg(
+                    live_instance.ws, req.chat_id, req.to_user_id, req.message
+                ),
+                timeout=15,
+            )
+            save_content = req.message
+            save_image_url = None
 
         # 保存到数据库并推送SSE
         from db_manager import db_manager
@@ -9819,14 +9836,16 @@ async def chat_send_message(
             cookie_id=cookie_id, chat_id=req.chat_id,
             sender_id=getattr(live_instance, 'myid', ''),
             sender_name=cookie_id,
-            content=req.message, content_type=1,
+            content=save_content, content_type=req.content_type,
+            image_url=save_image_url,
             direction=1, reply_source='客服'
         )
         publish_chat_message(cookie_id, {
             "msg_id": msg_id, "chat_id": req.chat_id,
             "sender_id": getattr(live_instance, 'myid', ''),
             "sender_name": cookie_id,
-            "content": req.message, "content_type": 1,
+            "content": save_content, "content_type": req.content_type,
+            "image_url": save_image_url,
             "direction": 1, "reply_source": "客服",
         })
 
@@ -9887,6 +9906,47 @@ def get_chat_accounts(current_user: Dict[str, Any] = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"获取聊天账号列表失败: {mask_sensitive_text(e)}")
         raise HTTPException(status_code=500, detail="获取账号列表失败")
+
+
+@app.get('/api/chat/quick-replies/{cid}')
+def get_quick_replies(
+    cid: str,
+    item_id: str = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取快捷回复短语列表（用于聊天界面快捷发送）"""
+    try:
+        cid = _ensure_cookie_access(cid, current_user)
+        from db_manager import db_manager
+        replies = []
+        # 1. 获取指定商品回复（如果有item_id）
+        if item_id:
+            item_reply = db_manager.get_item_replay_by_cookie_and_id(cid, item_id)
+            if item_reply and item_reply.get('reply_content'):
+                replies.append({'text': item_reply['reply_content'], 'source': '商品回复'})
+            # 2. 获取该商品的关键词回复
+            kws = db_manager.get_keywords_by_item_id(cid, item_id)
+            for kw in kws:
+                if kw.get('reply') and kw.get('type', 'text') == 'text':
+                    replies.append({'text': kw['reply'], 'source': f"关键词: {kw['keyword']}"})
+        # 3. 获取通用关键词回复
+        generic_kws = db_manager.get_keywords_by_item_id(cid, '')
+        for kw in generic_kws:
+            if kw.get('reply') and kw.get('type', 'text') == 'text':
+                replies.append({'text': kw['reply'], 'source': f"通用: {kw['keyword']}"})
+        # 去重
+        seen = set()
+        unique_replies = []
+        for r in replies:
+            if r['text'] not in seen:
+                seen.add(r['text'])
+                unique_replies.append(r)
+        return {"success": True, "replies": unique_replies}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取快捷回复失败: {mask_sensitive_text(e)}")
+        raise HTTPException(status_code=500, detail="获取快捷回复失败")
 
 
 @app.get('/api/chat/keywords/{cid}/item/{item_id}')

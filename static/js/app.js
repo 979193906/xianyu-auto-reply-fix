@@ -19783,6 +19783,8 @@ let chatOldestMsgId = null;
 let chatSseAbortController = null;
 let chatSseRetryCount = 0;
 let chatSseShouldRun = false;
+let chatUnreadCounts = {};  // { chat_id: count }
+let chatNotificationSound = null;
 
 // === 第1栏：账号列表 ===
 async function refreshChatAccounts() {
@@ -19871,13 +19873,15 @@ function renderChatSessions(sessions) {
         const displayName = s.buyer_name || (s.direction === 2 ? (s.sender_name || s.sender_id || s.chat_id) : (s.sender_name || s.chat_id));
         const avatar = (displayName || '?').charAt(0).toUpperCase();
         const preview = s.content_type === 2 ? '[图片]' : (s.content || '').substring(0, 25);
+        const unread = chatUnreadCounts[s.chat_id] || 0;
+        const badgeHtml = unread > 0 ? `<span class="chat-session-badge">${unread > 99 ? '99+' : unread}</span>` : '';
         div.innerHTML = `
             <div class="chat-session-avatar">${escapeHtml(avatar)}</div>
             <div class="chat-session-info">
                 <div class="chat-session-name">${escapeHtml(displayName)}</div>
                 <div class="chat-session-preview">${escapeHtml(preview)}</div>
             </div>
-            <div class="chat-session-time">${escapeHtml(formatChatTime(s.created_at))}</div>
+            <div class="chat-session-time">${escapeHtml(formatChatTime(s.created_at))}</div>${badgeHtml}
         `;
         div.onclick = () => selectChatSession(s);
         body.appendChild(div);
@@ -19897,6 +19901,7 @@ function filterChatSessions() {
 // === 第3栏：聊天区域 ===
 async function selectChatSession(session) {
     chatCurrentChatId = session.chat_id;
+    chatUnreadCounts[session.chat_id] = 0;
     chatCurrentToUserId = session.buyer_id || (session.direction === 2 ? (session.sender_id || '') : '');
     chatCurrentSenderName = session.buyer_name || (session.direction === 2 ? (session.sender_name || session.sender_id || session.chat_id) : (session.sender_name || session.chat_id));
     chatCurrentItemId = session.item_id || '';
@@ -19946,6 +19951,11 @@ async function selectChatSession(session) {
     }
 
     document.getElementById('chatInputBox')?.focus();
+    initChatImageHandlers();
+    // 自动加载快捷回复
+    if (!document.getElementById('chatQuickReplyBar')?.classList.contains('d-none')) {
+        loadQuickReplies();
+    }
 }
 
 async function loadChatMessages(append = false) {
@@ -20048,6 +20058,98 @@ function handleChatInputKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
 }
 
+function initChatImageHandlers() {
+    const inputArea = document.querySelector('.chat-input-area');
+    const inputBox = document.getElementById('chatInputBox');
+    if (!inputArea || !inputBox) return;
+
+    // Ctrl+V 粘贴图片
+    inputBox.addEventListener('paste', async (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                if (file) await uploadAndSendImage(file);
+                return;
+            }
+        }
+    });
+
+    // 拖拽图片
+    inputArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        inputArea.classList.add('drag-over');
+    });
+    inputArea.addEventListener('dragleave', () => {
+        inputArea.classList.remove('drag-over');
+    });
+    inputArea.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        inputArea.classList.remove('drag-over');
+        const files = e.dataTransfer?.files;
+        if (files) {
+            for (const file of files) {
+                if (file.type.startsWith('image/')) {
+                    await uploadAndSendImage(file);
+                }
+            }
+        }
+    });
+}
+
+async function uploadAndSendImage(file) {
+    if (!chatCurrentCookieId || !chatCurrentChatId || !chatCurrentToUserId) {
+        showToast('请先选择会话', 'warning');
+        return;
+    }
+    showToast('正在上传图片...', 'info');
+    try {
+        // 1. 上传图片到服务器
+        const formData = new FormData();
+        formData.append('image', file);
+        const uploadResp = await fetch(`${apiBase}/upload-image`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` },
+            body: formData
+        });
+        if (!uploadResp.ok) {
+            const err = await uploadResp.json().catch(() => ({}));
+            showToast(`图片上传失败: ${err.detail || '请重试'}`, 'danger');
+            return;
+        }
+        const uploadResult = await uploadResp.json();
+        const imageUrl = uploadResult.image_url;
+        if (!imageUrl) {
+            showToast('图片上传失败', 'danger');
+            return;
+        }
+
+        // 2. 通过聊天接口发送图片
+        const sendResp = await fetch(`${apiBase}/api/chat/send`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cookie_id: chatCurrentCookieId,
+                chat_id: chatCurrentChatId,
+                to_user_id: chatCurrentToUserId,
+                content_type: 2,
+                image_url: imageUrl,
+                message: ''
+            })
+        });
+        const result = await sendResp.json();
+        if (result.success) {
+            showToast('图片发送成功', 'success');
+        } else {
+            showToast(result.detail || '图片发送失败', 'danger');
+        }
+    } catch (e) {
+        showToast('图片发送失败', 'danger');
+    }
+}
+
 // === SSE 实时消息 ===
 async function initChatSSE() {
     if (chatSseAbortController) { chatSseAbortController.abort(); chatSseAbortController = null; }
@@ -20104,6 +20206,17 @@ function processChatSSEEvent(raw) {
                     reply_source: data.reply_source,
                     created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
                 });
+                // 当前会话清零未读
+                chatUnreadCounts[data.chat_id] = 0;
+            } else if (data.direction === 2) {
+                // 非当前会话的买家消息，增加未读计数
+                chatUnreadCounts[data.chat_id] = (chatUnreadCounts[data.chat_id] || 0) + 1;
+                renderChatSessions(chatSessionsCache);
+                playChatNotificationSound();
+            }
+            // 当前会话的卖家消息（direction=1）也要播放提示音
+            if (data.direction === 2) {
+                playChatNotificationSound();
             }
         }
     } catch (err) { console.error('SSE解析失败:', err); }
@@ -20135,6 +20248,63 @@ function toggleReplyPanel() {
 }
 function hideReplyPanel() {
     document.getElementById('chatReplyPanel')?.classList.add('d-none');
+}
+
+function toggleQuickReplyBar() {
+    const bar = document.getElementById('chatQuickReplyBar');
+    if (!bar) return;
+    bar.classList.toggle('d-none');
+    if (!bar.classList.contains('d-none')) {
+        loadQuickReplies();
+    }
+}
+
+async function loadQuickReplies() {
+    if (!chatCurrentCookieId) return;
+    const list = document.getElementById('chatQuickReplyList');
+    if (!list) return;
+    list.innerHTML = '<div class="text-muted small">加载中...</div>';
+    try {
+        let url = `${apiBase}/api/chat/quick-replies/${encodeURIComponent(chatCurrentCookieId)}`;
+        if (chatCurrentItemId) url += `?item_id=${encodeURIComponent(chatCurrentItemId)}`;
+        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+        const result = await resp.json();
+        if (result.success && result.replies && result.replies.length > 0) {
+            list.innerHTML = '';
+            result.replies.forEach(r => {
+                const span = document.createElement('span');
+                span.className = 'chat-quick-reply-item';
+                span.title = r.text + (r.source ? ` (${r.source})` : '');
+                span.textContent = r.text.length > 20 ? r.text.substring(0, 20) + '...' : r.text;
+                span.onclick = () => sendQuickReply(r.text);
+                list.appendChild(span);
+            });
+        } else {
+            list.innerHTML = '<div class="text-muted small">暂无快捷短语，请先在右侧面板或"自动回复"中添加关键词</div>';
+        }
+    } catch (e) {
+        list.innerHTML = '<div class="text-muted small text-danger">加载失败</div>';
+    }
+}
+
+async function sendQuickReply(text) {
+    if (!chatCurrentCookieId || !chatCurrentChatId || !chatCurrentToUserId) {
+        showToast('无法发送：缺少会话信息', 'warning');
+        return;
+    }
+    try {
+        const resp = await fetch(`${apiBase}/api/chat/send`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie_id: chatCurrentCookieId, chat_id: chatCurrentChatId, to_user_id: chatCurrentToUserId, message: text })
+        });
+        const result = await resp.json();
+        if (!result.success) {
+            showToast(result.detail || '发送失败', 'danger');
+        }
+    } catch (e) {
+        showToast('发送失败', 'danger');
+    }
 }
 
 async function loadItemKeywords() {
@@ -20297,6 +20467,29 @@ function formatChatTime(ts) {
 function loadOnlineIm() {
     refreshChatAccounts();
     initChatSSE();
+    // 初始化消息提示音（使用 Web Audio API 生成简短提示音）
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) chatNotificationSound = new AudioCtx();
+    } catch(e) {}
+}
+
+function playChatNotificationSound() {
+    try {
+        if (!chatNotificationSound) return;
+        const ctx = chatNotificationSound;
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
 }
 
 // 兼容旧函数名
