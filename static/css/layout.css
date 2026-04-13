@@ -305,12 +305,13 @@ body.sidebar-collapsed .main-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 0;
   font-weight: 600;
   font-size: 13px;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: none;
   flex-shrink: 0;
   background: var(--bs-body-bg, #fff);
+  position: relative;
 }
 .chat-panel-body {
   flex: 1;
@@ -584,29 +585,110 @@ body.sidebar-collapsed .main-content {
 }
 
 /* 右侧面板 Tab 切换 */
+.chat-panel-tabs-bar {
+  display: flex;
+  background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
 .chat-panel-tab {
   flex: 1;
-  padding: 8px 4px;
-  font-size: 12px;
+  padding: 10px 4px;
+  font-size: 13px;
   font-weight: 600;
   text-align: center;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--bs-secondary-color, #6c757d);
+  border-bottom: 2.5px solid transparent;
+  color: #8492a6;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
+  position: relative;
 }
 .chat-panel-tab:hover {
-  color: var(--bs-primary, #0d6efd);
+  color: #5b6abf;
+  background: rgba(91,106,191,0.04);
 }
 .chat-panel-tab.active {
-  color: var(--bs-primary, #0d6efd);
-  border-bottom-color: var(--bs-primary, #0d6efd);
+  color: #5b6abf;
+  border-bottom-color: #5b6abf;
+  background: rgba(91,106,191,0.06);
 }
 .chat-panel-tab-content {
   flex: 1;
   overflow-y: auto;
+}
+
+/* 快捷回复添加/编辑表单 */
+.qr-form-card {
+  background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.qr-form-card .form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 4px;
+}
+.qr-form-card .form-control {
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.qr-form-card .form-control:focus {
+  border-color: #5b6abf;
+  box-shadow: 0 0 0 3px rgba(91,106,191,0.1);
+}
+.qr-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.qr-form-actions .btn {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 0;
+}
+.qr-btn-save {
+  background: linear-gradient(135deg, #5b6abf 0%, #7c3aed 100%);
+  color: #fff;
+  border: none;
+}
+.qr-btn-save:hover {
+  background: linear-gradient(135deg, #4f5cb3 0%, #6d28d9 100%);
+  color: #fff;
+}
+.qr-btn-cancel {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+.qr-btn-cancel:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+.qr-add-btn {
+  background: linear-gradient(135deg, #5b6abf 0%, #7c3aed 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  transition: all 0.2s;
+}
+.qr-add-btn:hover {
+  background: linear-gradient(135deg, #4f5cb3 0%, #6d28d9 100%);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(91,106,191,0.25);
 }
 
 /* 快捷回复列表 */
@@ -614,18 +696,23 @@ body.sidebar-collapsed .main-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 8px 10px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  border-bottom: 1px solid var(--bs-border-color, #f0f0f0);
+  border-radius: 8px;
+  margin-bottom: 2px;
+  color: #475569;
+  transition: background 0.15s;
 }
 .qr-group-header:hover {
-  color: var(--bs-primary, #0d6efd);
+  background: #f1f5f9;
+  color: #5b6abf;
 }
 .qr-group-header i {
   transition: transform 0.2s;
-  font-size: 12px;
+  font-size: 11px;
+  color: #94a3b8;
 }
 .qr-group-header.collapsed i {
   transform: rotate(-90deg);
@@ -633,13 +720,15 @@ body.sidebar-collapsed .main-content {
 .qr-item {
   display: flex;
   align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--bs-border-color, #f5f5f5);
+  padding: 9px 10px;
+  border-radius: 8px;
   font-size: 12px;
-  gap: 6px;
+  gap: 8px;
+  margin: 2px 0;
+  transition: background 0.15s;
 }
-.qr-item:last-child {
-  border-bottom: none;
+.qr-item:hover {
+  background: #f8fafc;
 }
 .qr-item-content {
   flex: 1;
@@ -649,27 +738,40 @@ body.sidebar-collapsed .main-content {
   white-space: nowrap;
   cursor: pointer;
   color: var(--bs-body-color);
+  padding: 2px 0;
 }
 .qr-item-content:hover {
-  color: var(--bs-primary, #0d6efd);
+  color: #5b6abf;
 }
 .qr-item-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.qr-item:hover .qr-item-actions {
+  opacity: 1;
 }
 .qr-item-actions a {
   font-size: 11px;
   cursor: pointer;
   text-decoration: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.qr-item-actions a:hover {
+  background: rgba(0,0,0,0.05);
 }
 .qr-trigger-badge {
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: #fff3cd;
-  color: #856404;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
   flex-shrink: 0;
+  font-weight: 500;
 }
 
 /* 图片上传拖拽提示 */
