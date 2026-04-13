@@ -9908,45 +9908,95 @@ def get_chat_accounts(current_user: Dict[str, Any] = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="获取账号列表失败")
 
 
-@app.get('/api/chat/quick-replies/{cid}')
-def get_quick_replies(
-    cid: str,
-    item_id: str = None,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """获取快捷回复短语列表（用于聊天界面快捷发送）"""
+@app.get('/api/chat/quick-replies')
+def get_quick_replies(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取当前用户的快捷回复短语列表"""
     try:
-        cid = _ensure_cookie_access(cid, current_user)
+        user_id = current_user['user_id']
         from db_manager import db_manager
-        replies = []
-        # 1. 获取指定商品回复（如果有item_id）
-        if item_id:
-            item_reply = db_manager.get_item_replay_by_cookie_and_id(cid, item_id)
-            if item_reply and item_reply.get('reply_content'):
-                replies.append({'text': item_reply['reply_content'], 'source': '商品回复'})
-            # 2. 获取该商品的关键词回复
-            kws = db_manager.get_keywords_by_item_id(cid, item_id)
-            for kw in kws:
-                if kw.get('reply') and kw.get('type', 'text') == 'text':
-                    replies.append({'text': kw['reply'], 'source': f"关键词: {kw['keyword']}"})
-        # 3. 获取通用关键词回复
-        generic_kws = db_manager.get_keywords_by_item_id(cid, '')
-        for kw in generic_kws:
-            if kw.get('reply') and kw.get('type', 'text') == 'text':
-                replies.append({'text': kw['reply'], 'source': f"通用: {kw['keyword']}"})
-        # 去重
-        seen = set()
-        unique_replies = []
+        replies = db_manager.get_quick_replies(user_id)
+        # 按 group_name 分组
+        groups = {}
         for r in replies:
-            if r['text'] not in seen:
-                seen.add(r['text'])
-                unique_replies.append(r)
-        return {"success": True, "replies": unique_replies}
-    except HTTPException:
-        raise
+            gn = r.get('group_name', '默认')
+            if gn not in groups:
+                groups[gn] = []
+            groups[gn].append(r)
+        return {"success": True, "groups": groups, "total": len(replies)}
     except Exception as e:
         logger.error(f"获取快捷回复失败: {mask_sensitive_text(e)}")
         raise HTTPException(status_code=500, detail="获取快捷回复失败")
+
+
+class QuickReplyRequest(BaseModel):
+    content: str
+    group_name: str = '默认'
+    trigger_keyword: str = ''
+
+
+@app.post('/api/chat/quick-replies')
+def add_quick_reply(
+    req: QuickReplyRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """添加快捷回复短语"""
+    try:
+        user_id = current_user['user_id']
+        if not req.content.strip():
+            raise HTTPException(status_code=400, detail="内容不能为空")
+        from db_manager import db_manager
+        new_id = db_manager.add_quick_reply(
+            user_id=user_id,
+            content=req.content.strip(),
+            group_name=req.group_name.strip() or '默认',
+            trigger_keyword=req.trigger_keyword.strip(),
+        )
+        if new_id:
+            return {"success": True, "id": new_id}
+        raise HTTPException(status_code=500, detail="添加失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"添加快捷回复失败: {mask_sensitive_text(e)}")
+        raise HTTPException(status_code=500, detail="添加快捷回复失败")
+
+
+@app.put('/api/chat/quick-replies/{reply_id}')
+def update_quick_reply_endpoint(
+    reply_id: int,
+    req: QuickReplyRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新快捷回复短语"""
+    try:
+        user_id = current_user['user_id']
+        from db_manager import db_manager
+        success = db_manager.update_quick_reply(
+            reply_id=reply_id, user_id=user_id,
+            content=req.content.strip() if req.content else None,
+            group_name=req.group_name.strip() if req.group_name else None,
+            trigger_keyword=req.trigger_keyword.strip() if req.trigger_keyword is not None else None,
+        )
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"更新快捷回复失败: {mask_sensitive_text(e)}")
+        raise HTTPException(status_code=500, detail="更新快捷回复失败")
+
+
+@app.delete('/api/chat/quick-replies/{reply_id}')
+def delete_quick_reply_endpoint(
+    reply_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """删除快捷回复短语"""
+    try:
+        user_id = current_user['user_id']
+        from db_manager import db_manager
+        success = db_manager.delete_quick_reply(reply_id, user_id)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"删除快捷回复失败: {mask_sensitive_text(e)}")
+        raise HTTPException(status_code=500, detail="删除快捷回复失败")
 
 
 @app.get('/api/chat/keywords/{cid}/item/{item_id}')

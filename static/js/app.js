@@ -19952,10 +19952,6 @@ async function selectChatSession(session) {
 
     document.getElementById('chatInputBox')?.focus();
     initChatImageHandlers();
-    // 自动加载快捷回复
-    if (!document.getElementById('chatQuickReplyBar')?.classList.contains('d-none')) {
-        loadQuickReplies();
-    }
 }
 
 async function loadChatMessages(append = false) {
@@ -20242,54 +20238,83 @@ function toggleReplyPanel() {
     const panel = document.getElementById('chatReplyPanel');
     if (!panel) return;
     panel.classList.toggle('d-none');
-    if (!panel.classList.contains('d-none') && chatCurrentItemId) {
-        loadItemKeywords();
+    if (!panel.classList.contains('d-none')) {
+        // 找到当前激活的 tab
+        const activeTab = panel.querySelector('.chat-panel-tab.active');
+        const tabName = activeTab ? activeTab.dataset.tab : 'quick-reply';
+        if (tabName === 'quick-reply') loadQuickReplyList();
+        else if (tabName === 'item-reply' && chatCurrentItemId) loadItemKeywords();
     }
 }
 function hideReplyPanel() {
     document.getElementById('chatReplyPanel')?.classList.add('d-none');
 }
 
-function toggleQuickReplyBar() {
-    const bar = document.getElementById('chatQuickReplyBar');
-    if (!bar) return;
-    bar.classList.toggle('d-none');
-    if (!bar.classList.contains('d-none')) {
-        loadQuickReplies();
-    }
+// === 右侧面板 Tab 切换 ===
+function switchPanelTab(tabName) {
+    // 切换 Tab 按钮高亮
+    document.querySelectorAll('.chat-panel-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    // 切换内容区
+    document.getElementById('tabQuickReply').style.display = tabName === 'quick-reply' ? '' : 'none';
+    document.getElementById('tabItemReply').style.display = tabName === 'item-reply' ? '' : 'none';
+    document.getElementById('tabExtra').style.display = tabName === 'extra' ? '' : 'none';
+    // 加载对应数据
+    if (tabName === 'quick-reply') loadQuickReplyList();
+    if (tabName === 'item-reply' && chatCurrentItemId) loadItemKeywords();
 }
 
-async function loadQuickReplies() {
-    if (!chatCurrentCookieId) return;
-    const list = document.getElementById('chatQuickReplyList');
-    if (!list) return;
-    list.innerHTML = '<div class="text-muted small">加载中...</div>';
+// === 快捷回复 CRUD ===
+async function loadQuickReplyList() {
+    const container = document.getElementById('quickReplyGroupList');
+    if (!container) return;
+    container.innerHTML = '<div class="text-muted small">加载中...</div>';
     try {
-        let url = `${apiBase}/api/chat/quick-replies/${encodeURIComponent(chatCurrentCookieId)}`;
-        if (chatCurrentItemId) url += `?item_id=${encodeURIComponent(chatCurrentItemId)}`;
-        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
+        const resp = await fetch(`${apiBase}/api/chat/quick-replies`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
         const result = await resp.json();
-        if (result.success && result.replies && result.replies.length > 0) {
-            list.innerHTML = '';
-            result.replies.forEach(r => {
-                const span = document.createElement('span');
-                span.className = 'chat-quick-reply-item';
-                span.title = r.text + (r.source ? ` (${r.source})` : '');
-                span.textContent = r.text.length > 20 ? r.text.substring(0, 20) + '...' : r.text;
-                span.onclick = () => sendQuickReply(r.text);
-                list.appendChild(span);
-            });
-        } else {
-            list.innerHTML = '<div class="text-muted small">暂无快捷短语，请先在右侧面板或"自动回复"中添加关键词</div>';
+        if (!result.success) { container.innerHTML = '<div class="text-danger small">加载失败</div>'; return; }
+        const groups = result.groups || {};
+        const groupNames = Object.keys(groups);
+        if (groupNames.length === 0 && result.total === 0) {
+            container.innerHTML = '<div class="text-muted small py-3 text-center">暂无快捷短语，点击上方"添加"创建</div>';
+            return;
         }
+        container.innerHTML = '';
+        groupNames.forEach(gn => {
+            const items = groups[gn];
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'qr-group mb-2';
+            groupDiv.innerHTML = `<div class="qr-group-header" onclick="this.classList.toggle('collapsed');this.nextElementSibling.style.display=this.classList.contains('collapsed')?'none':'';">
+                <span>${escapeHtml(gn)} (${items.length})</span><i class="bi bi-chevron-down"></i>
+            </div><div class="qr-group-body"></div>`;
+            const body = groupDiv.querySelector('.qr-group-body');
+            items.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'qr-item';
+                const triggerHtml = item.trigger_keyword ? `<span class="qr-trigger-badge" title="触发词: ${escapeHtml(item.trigger_keyword)}">${escapeHtml(item.trigger_keyword)}</span>` : '';
+                row.innerHTML = `
+                    <span class="qr-item-content" title="${escapeHtml(item.content)}" onclick="sendQuickReplyText('${escapeHtml(item.content.replace(/'/g, "\\'"))}')">${escapeHtml(item.content.length > 25 ? item.content.substring(0, 25) + '...' : item.content)}</span>
+                    ${triggerHtml}
+                    <span class="qr-item-actions">
+                        <a class="text-primary" onclick="editQuickReply(${item.id}, '${escapeHtml(item.content.replace(/'/g, "\\'"))}', '${escapeHtml(gn.replace(/'/g, "\\'"))}', '${escapeHtml((item.trigger_keyword||'').replace(/'/g, "\\'"))}')">编辑</a>
+                        <a class="text-success" onclick="sendQuickReplyText('${escapeHtml(item.content.replace(/'/g, "\\'"))}')">发送</a>
+                        <a class="text-danger" onclick="deleteQuickReply(${item.id})">删</a>
+                    </span>`;
+                body.appendChild(row);
+            });
+            container.appendChild(groupDiv);
+        });
     } catch (e) {
-        list.innerHTML = '<div class="text-muted small text-danger">加载失败</div>';
+        container.innerHTML = '<div class="text-danger small">加载失败</div>';
     }
 }
 
-async function sendQuickReply(text) {
+async function sendQuickReplyText(text) {
     if (!chatCurrentCookieId || !chatCurrentChatId || !chatCurrentToUserId) {
-        showToast('无法发送：缺少会话信息', 'warning');
+        showToast('请先选择会话', 'warning');
         return;
     }
     try {
@@ -20299,11 +20324,84 @@ async function sendQuickReply(text) {
             body: JSON.stringify({ cookie_id: chatCurrentCookieId, chat_id: chatCurrentChatId, to_user_id: chatCurrentToUserId, message: text })
         });
         const result = await resp.json();
-        if (!result.success) {
+        if (result.success) {
+            showToast('已发送', 'success');
+        } else {
             showToast(result.detail || '发送失败', 'danger');
         }
     } catch (e) {
         showToast('发送失败', 'danger');
+    }
+}
+
+function addQuickReply() {
+    const content = prompt('输入快捷回复内容:');
+    if (!content || !content.trim()) return;
+    const group = prompt('分组名称（默认为"默认"）:', '默认') || '默认';
+    const trigger = prompt('触发关键词（可选，留空则不自动触发）:', '') || '';
+    (async () => {
+        try {
+            const resp = await fetch(`${apiBase}/api/chat/quick-replies`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content.trim(), group_name: group.trim(), trigger_keyword: trigger.trim() })
+            });
+            const result = await resp.json();
+            if (result.success) {
+                showToast('添加成功', 'success');
+                loadQuickReplyList();
+            } else {
+                showToast(result.detail || '添加失败', 'danger');
+            }
+        } catch (e) {
+            showToast('添加失败', 'danger');
+        }
+    })();
+}
+
+function editQuickReply(id, oldContent, oldGroup, oldTrigger) {
+    const content = prompt('修改回复内容:', oldContent);
+    if (content === null) return;
+    const group = prompt('分组名称:', oldGroup);
+    if (group === null) return;
+    const trigger = prompt('触发关键词（留空不自动触发）:', oldTrigger);
+    if (trigger === null) return;
+    (async () => {
+        try {
+            const resp = await fetch(`${apiBase}/api/chat/quick-replies/${id}`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content.trim(), group_name: group.trim() || '默认', trigger_keyword: trigger.trim() })
+            });
+            const result = await resp.json();
+            if (result.success) {
+                showToast('修改成功', 'success');
+                loadQuickReplyList();
+            } else {
+                showToast('修改失败', 'danger');
+            }
+        } catch (e) {
+            showToast('修改失败', 'danger');
+        }
+    })();
+}
+
+async function deleteQuickReply(id) {
+    if (!confirm('确定删除此快捷回复？')) return;
+    try {
+        const resp = await fetch(`${apiBase}/api/chat/quick-replies/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const result = await resp.json();
+        if (result.success) {
+            showToast('已删除', 'success');
+            loadQuickReplyList();
+        } else {
+            showToast('删除失败', 'danger');
+        }
+    } catch (e) {
+        showToast('删除失败', 'danger');
     }
 }
 

@@ -2548,22 +2548,11 @@
                       <small class="text-muted ms-2" id="chatHeaderItemId"></small>
                     </div>
                     <div class="d-flex gap-1">
-                      <button class="btn btn-sm btn-outline-secondary" onclick="toggleQuickReplyBar()" title="快捷短语"><i class="bi bi-lightning"></i></button>
                       <button class="btn btn-sm btn-outline-secondary" onclick="loadMoreChatMessages()" title="加载更多"><i class="bi bi-clock-history"></i></button>
-                      <button class="btn btn-sm btn-outline-primary" onclick="toggleReplyPanel()" title="商品回复" id="btnToggleReply"><i class="bi bi-chat-right-text"></i></button>
+                      <button class="btn btn-sm btn-outline-primary" onclick="toggleReplyPanel()" title="侧栏" id="btnToggleReply"><i class="bi bi-layout-sidebar-reverse"></i></button>
                     </div>
                   </div>
                   <div class="chat-messages-area" id="chatMessagesArea"></div>
-                  <!-- 快捷回复栏 -->
-                  <div id="chatQuickReplyBar" class="chat-quick-reply-bar d-none">
-                    <div class="chat-quick-reply-header">
-                      <span class="fw-bold small">快捷短语</span>
-                      <button class="btn btn-sm p-0 border-0" onclick="toggleQuickReplyBar()" title="收起"><i class="bi bi-chevron-down"></i></button>
-                    </div>
-                    <div id="chatQuickReplyList" class="chat-quick-reply-list">
-                      <div class="text-muted small">暂无快捷短语</div>
-                    </div>
-                  </div>
                   <div class="chat-input-area border-top p-2">
                     <div class="d-flex gap-2">
                       <textarea class="form-control form-control-sm" id="chatInputBox" rows="4" placeholder="输入消息... (Enter发送, Shift+Enter换行)" style="min-height:80px;" onkeydown="handleChatInputKeydown(event)"></textarea>
@@ -2571,15 +2560,31 @@
                     </div>
                   </div>
                 </div>
-                <!-- 右：商品回复编辑面板 -->
+                <!-- 右：侧栏面板（三Tab切换） -->
                 <div class="chat-reply-panel d-none" id="chatReplyPanel">
-                  <div class="chat-panel-header">
-                    <span>商品回复设置</span>
-                    <button class="btn btn-link btn-sm p-0" onclick="toggleReplyPanel()" title="关闭"><i class="bi bi-x-lg"></i></button>
+                  <div class="chat-panel-header" style="padding:0;">
+                    <div class="d-flex w-100">
+                      <button class="chat-panel-tab active" data-tab="quick-reply" onclick="switchPanelTab('quick-reply')">快捷回复</button>
+                      <button class="chat-panel-tab" data-tab="item-reply" onclick="switchPanelTab('item-reply')">商品回复</button>
+                      <button class="chat-panel-tab" data-tab="extra" onclick="switchPanelTab('extra')">更多</button>
+                    </div>
+                    <button class="btn btn-link btn-sm p-0 me-2" onclick="toggleReplyPanel()" title="关闭"><i class="bi bi-x-lg"></i></button>
                   </div>
-                  <div class="chat-reply-body" id="chatReplyBody">
+                  <!-- Tab 1: 快捷回复 -->
+                  <div class="chat-panel-tab-content active" id="tabQuickReply">
                     <div class="p-3">
-                      <!-- 商品信息 -->
+                      <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-bold small">快捷短语</span>
+                        <button class="btn btn-sm btn-outline-primary" onclick="addQuickReply()" style="font-size:11px;"><i class="bi bi-plus"></i> 添加</button>
+                      </div>
+                      <div id="quickReplyGroupList">
+                        <div class="text-muted small">加载中...</div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Tab 2: 商品回复设置 -->
+                  <div class="chat-panel-tab-content" id="tabItemReply" style="display:none;">
+                    <div class="p-3">
                       <div class="mb-3">
                         <label class="form-label fw-bold small">当前商品</label>
                         <div class="input-group input-group-sm">
@@ -2587,12 +2592,10 @@
                           <input type="text" class="form-control" id="replyItemId" readonly>
                         </div>
                       </div>
-                      <!-- 指定商品回复 -->
                       <div class="mb-3">
                         <label class="form-label fw-bold small">指定商品回复 <span class="text-muted fw-normal">(优先级最高)</span></label>
                         <textarea class="form-control form-control-sm" id="replyItemReply" rows="2" placeholder="输入该商品的固定回复..."></textarea>
                       </div>
-                      <!-- 商品关键词列表 -->
                       <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-1">
                           <label class="form-label fw-bold small mb-0">商品关键词</label>
@@ -2600,14 +2603,19 @@
                         </div>
                         <div id="replyKeywordsList"></div>
                       </div>
-                      <!-- 保存按钮 -->
                       <button class="btn btn-primary btn-sm w-100 mb-3" onclick="saveItemKeywords()"><i class="bi bi-check-lg me-1"></i>保存回复设置</button>
-                      <!-- 复用回复 -->
                       <div class="border-top pt-3">
                         <label class="form-label fw-bold small">一键复用到其他商品</label>
                         <div id="copyTargetItems" class="mb-2" style="max-height: 150px; overflow-y: auto;"></div>
                         <button class="btn btn-outline-success btn-sm w-100" onclick="copyKeywordsToSelected()"><i class="bi bi-files me-1"></i>复制到选中商品</button>
                       </div>
+                    </div>
+                  </div>
+                  <!-- Tab 3: 更多（暂定） -->
+                  <div class="chat-panel-tab-content" id="tabExtra" style="display:none;">
+                    <div class="p-3 text-center text-muted">
+                      <i class="bi bi-gear" style="font-size:2rem;"></i>
+                      <div class="mt-2 small">更多功能开发中...</div>
                     </div>
                   </div>
                 </div>

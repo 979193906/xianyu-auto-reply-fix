@@ -846,6 +846,20 @@ class DBManager:
             ''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_messages_lookup ON chat_messages(cookie_id, chat_id, created_at)')
 
+            # 快捷回复短语表
+            self._execute_sql(cursor, '''
+                CREATE TABLE IF NOT EXISTS quick_replies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    group_name TEXT DEFAULT '默认',
+                    content TEXT NOT NULL,
+                    trigger_keyword TEXT DEFAULT '',
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            ''')
+
             # 插入默认通知模板
             cursor.execute('''
             INSERT OR IGNORE INTO notification_templates (type, template) VALUES
@@ -9117,6 +9131,81 @@ Cookie数量: {cookie_count}
         except Exception as e:
             logger.error(f"获取聊天消息失败: {e}")
             return []
+
+    def get_quick_replies(self, user_id: int) -> list:
+        """获取用户的快捷回复短语列表"""
+        try:
+            cursor = self.conn.cursor()
+            self._execute_sql(cursor, """
+                SELECT id, group_name, content, trigger_keyword, sort_order
+                FROM quick_replies
+                WHERE user_id = ?
+                ORDER BY group_name, sort_order, id
+            """, (user_id,))
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
+            logger.error(f"获取快捷回复失败: {e}")
+            return []
+
+    def add_quick_reply(self, user_id: int, content: str, group_name: str = '默认', trigger_keyword: str = '') -> int:
+        """添加快捷回复短语，返回新记录ID"""
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+                self._execute_sql(cursor, """
+                    INSERT INTO quick_replies (user_id, group_name, content, trigger_keyword)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, group_name or '默认', content, trigger_keyword or ''))
+                self.conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"添加快捷回复失败: {e}")
+            return 0
+
+    def update_quick_reply(self, reply_id: int, user_id: int, content: str = None, group_name: str = None, trigger_keyword: str = None) -> bool:
+        """更新快捷回复短语"""
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+                fields = []
+                params = []
+                if content is not None:
+                    fields.append("content = ?")
+                    params.append(content)
+                if group_name is not None:
+                    fields.append("group_name = ?")
+                    params.append(group_name)
+                if trigger_keyword is not None:
+                    fields.append("trigger_keyword = ?")
+                    params.append(trigger_keyword)
+                if not fields:
+                    return True
+                params.extend([reply_id, user_id])
+                self._execute_sql(cursor, f"""
+                    UPDATE quick_replies SET {', '.join(fields)}
+                    WHERE id = ? AND user_id = ?
+                """, tuple(params))
+                self.conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"更新快捷回复失败: {e}")
+            return False
+
+    def delete_quick_reply(self, reply_id: int, user_id: int) -> bool:
+        """删除快捷回复短语"""
+        try:
+            with self.lock:
+                cursor = self.conn.cursor()
+                self._execute_sql(cursor, """
+                    DELETE FROM quick_replies WHERE id = ? AND user_id = ?
+                """, (reply_id, user_id))
+                self.conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"删除快捷回复失败: {e}")
+            return False
 
     def cleanup_old_chat_messages(self, days: int = 30) -> int:
         """清理指定天数前的聊天消息"""

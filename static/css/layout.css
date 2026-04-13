@@ -583,47 +583,93 @@ body.sidebar-collapsed .main-content {
   margin-left: 6px;
 }
 
-/* 快捷回复栏 */
-.chat-quick-reply-bar {
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
-  background: var(--bs-body-bg, #fff);
-  max-height: 180px;
-  overflow: hidden;
-  flex-shrink: 0;
+/* 右侧面板 Tab 切换 */
+.chat-panel-tab {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--bs-secondary-color, #6c757d);
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.chat-quick-reply-header {
+.chat-panel-tab:hover {
+  color: var(--bs-primary, #0d6efd);
+}
+.chat-panel-tab.active {
+  color: var(--bs-primary, #0d6efd);
+  border-bottom-color: var(--bs-primary, #0d6efd);
+}
+.chat-panel-tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* 快捷回复列表 */
+.qr-group-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
   border-bottom: 1px solid var(--bs-border-color, #f0f0f0);
 }
-.chat-quick-reply-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px;
-  overflow-y: auto;
-  max-height: 140px;
+.qr-group-header:hover {
+  color: var(--bs-primary, #0d6efd);
 }
-.chat-quick-reply-item {
-  display: inline-block;
-  padding: 4px 12px;
+.qr-group-header i {
+  transition: transform 0.2s;
   font-size: 12px;
-  background: var(--bs-tertiary-bg, #f8f9fa);
-  border: 1px solid var(--bs-border-color, #dee2e6);
-  border-radius: 14px;
-  cursor: pointer;
-  white-space: nowrap;
+}
+.qr-group-header.collapsed i {
+  transform: rotate(-90deg);
+}
+.qr-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bs-border-color, #f5f5f5);
+  font-size: 12px;
+  gap: 6px;
+}
+.qr-item:last-child {
+  border-bottom: none;
+}
+.qr-item-content {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
-  transition: all 0.15s;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--bs-body-color);
 }
-.chat-quick-reply-item:hover {
-  background: var(--bs-primary-bg-subtle, #e7f1ff);
-  border-color: var(--bs-primary-border-subtle, #b6d4fe);
+.qr-item-content:hover {
   color: var(--bs-primary, #0d6efd);
+}
+.qr-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.qr-item-actions a {
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.qr-trigger-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #fff3cd;
+  color: #856404;
+  flex-shrink: 0;
 }
 
 /* 图片上传拖拽提示 */
