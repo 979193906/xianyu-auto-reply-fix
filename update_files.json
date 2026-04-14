@@ -1,0 +1,476 @@
+{
+  "version": "v2.1.1",
+  "release_date": "2026-04-14",
+  "description": "版本 v2.1.1 更新",
+  "min_version": "v1.0.0",
+  "changelog": [
+    "GitHub Releases 热更新清单"
+  ],
+  "files": [
+    {
+      "path": "Start.py",
+      "md5": "18dd85e369e51f6685e488a81765dfcb",
+      "size": 25837,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/Start.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "XianyuAutoAsync.py",
+      "md5": "eec8fae0086815a56f17a7399070137f",
+      "size": 795653,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/XianyuAutoAsync.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "ai_reply_engine.py",
+      "md5": "d25ec80c792d340d475f712c65c4fb29",
+      "size": 27882,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/ai_reply_engine.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "api_captcha_remote.py",
+      "md5": "3a1e1a24bca76dcf2d6ce2eab7d5e23d",
+      "size": 11029,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/api_captcha_remote.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "auto_updater.py",
+      "md5": "234f846183d2d6a81035391670f5eea5",
+      "size": 38966,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/auto_updater.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "captcha_control.html",
+      "md5": "a3e9cab5bc2412339bd86bc536212548",
+      "size": 18136,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/captcha_control.html",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "chat_event_hub.py",
+      "md5": "8152f79f98751eed9c59851d800fa297",
+      "size": 2136,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/chat_event_hub.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "config.py",
+      "md5": "d28899ffa935d0a1bc3be32c655cf053",
+      "size": 4483,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/config.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "cookie_manager.py",
+      "md5": "4baae8d3d9d3438e9967407b8b789d54",
+      "size": 19862,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/cookie_manager.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "db_manager.py",
+      "md5": "53916e11b24ab85bcebf66683cc98425",
+      "size": 421228,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/db_manager.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "file_log_collector.py",
+      "md5": "a70f31cbfebe0ba243e04c7c87ffb44b",
+      "size": 8423,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/file_log_collector.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "generate_update_manifest.py",
+      "md5": "26cb33c38207cf78432c3d1c350918e1",
+      "size": 12202,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/generate_update_manifest.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "order_event_hub.py",
+      "md5": "6c54e13052094854a5e5072f5831afad",
+      "size": 2394,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/order_event_hub.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "order_status_handler.py",
+      "md5": "256b9b5e3378b0cba1536b7b661986c3",
+      "size": 81046,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/order_status_handler.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "release_precheck.py",
+      "md5": "2aa31ecfcc65b2f2cc6a5b16b383b1ee",
+      "size": 6604,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/release_precheck.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "reply_server.py",
+      "md5": "ba4d49e5954766bdd59e2177745485cc",
+      "size": 470146,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/reply_server.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "secure_confirm_decrypted.py",
+      "md5": "2f8e07ab66c8ecc9c00ab4ff0229da68",
+      "size": 9644,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/secure_confirm_decrypted.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "secure_freeshipping_decrypted.py",
+      "md5": "3f55e15cb21f2953defed661b17c3f96",
+      "size": 7451,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/secure_freeshipping_decrypted.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "secure_item_polish_ultra.py",
+      "md5": "ba1634ce9475efc1e22db4384910807f",
+      "size": 6287,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/secure_item_polish_ultra.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "static/css/about.css",
+      "md5": "50496eaf50dc0938b722f1874b112866",
+      "size": 1272,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/about.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/accounts.css",
+      "md5": "eb4f0aba5be29cc2996b7d83ae253cb5",
+      "size": 30592,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/accounts.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/admin.css",
+      "md5": "d6ebb1f2813ec644ee7db11c242b25df",
+      "size": 4548,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/admin.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/app.css",
+      "md5": "4af621ebef422a6eb123687da782871b",
+      "size": 315,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/app.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/components.css",
+      "md5": "05ae24f298fc533ab11b446284571024",
+      "size": 16533,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/components.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/dashboard.css",
+      "md5": "7f19a9fe3dec8b8e8f0c59f957ac0c53",
+      "size": 46963,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/dashboard.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/items.css",
+      "md5": "6f72ce12f22a8d7ad2453bbc0976edb3",
+      "size": 1013,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/items.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/keywords.css",
+      "md5": "7d33b8f1873c58b2f79d573e71ac1867",
+      "size": 18457,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/keywords.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/layout.css",
+      "md5": "7e11d2a32c25f8782fb48c943bf66d4c",
+      "size": 16318,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/layout.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/logs.css",
+      "md5": "24b726b067f732e965f3a7e6ede3d62b",
+      "size": 16455,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/logs.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/notifications.css",
+      "md5": "d7bab338e237dc5d754d599cf37cd9d8",
+      "size": 2007,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/notifications.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/css/variables.css",
+      "md5": "d3235d17426cdc74ead915ef3f7384fa",
+      "size": 14734,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/css/variables.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/favicon.png",
+      "md5": "d456907103c7a3434a475c83cc9cbb6d",
+      "size": 7996,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/favicon.png",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/index.html",
+      "md5": "c9a6db7dc5ff04eb7116ccb268a59724",
+      "size": 826624,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/index.html",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/js/app.js",
+      "md5": "a4f9181c40d125a6f937d41c84f0485e",
+      "size": 751141,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/js/app.js",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/lib/bootstrap-icons/bootstrap-icons.css",
+      "md5": "a65fdadd9ff4f804c8d04dec25e5b2a5",
+      "size": 98255,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/lib/bootstrap-icons/bootstrap-icons.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/lib/bootstrap-icons/fonts/bootstrap-icons.woff",
+      "md5": "831d52f3c78cb3dcb200998d02edc0a8",
+      "size": 176196,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/lib/bootstrap-icons/fonts/bootstrap-icons.woff",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/lib/bootstrap-icons/fonts/bootstrap-icons.woff2",
+      "md5": "adc119571f0673e6063bd596679b6ee5",
+      "size": 130764,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/lib/bootstrap-icons/fonts/bootstrap-icons.woff2",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/lib/bootstrap/bootstrap.bundle.min.js",
+      "md5": "6baf57f25796c332144ed58a2a0cd9ee",
+      "size": 80663,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/lib/bootstrap/bootstrap.bundle.min.js",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/lib/bootstrap/bootstrap.min.css",
+      "md5": "cd822b7fd22c8a95a68470c795adea69",
+      "size": 232948,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/lib/bootstrap/bootstrap.min.css",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/login.html",
+      "md5": "5a3baa7aa7a33fd75733cd59ff0b814c",
+      "size": 33506,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/login.html",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/register.html",
+      "md5": "9bb434efcf4f4642a02622e6fc8d45d9",
+      "size": 21354,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/register.html",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/update_log.txt",
+      "md5": "d3e9cd6a0034974802965149307020d0",
+      "size": 18605,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/update_log.txt",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/userscripts/goofish-dark-mode.user.js",
+      "md5": "7605af82f10f39ebab856f0fc876af64",
+      "size": 12999,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/userscripts/goofish-dark-mode.user.js",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/version.txt",
+      "md5": "670c428e83eb628408b5e5d270741bd2",
+      "size": 7,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/version.txt",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "static/xianyu_js_version_2.js",
+      "md5": "04f038885e7cb7051bdb2d2740791614",
+      "size": 20424,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/xianyu_js_version_2.js",
+      "requires_restart": false,
+      "description": ""
+    },
+    {
+      "path": "utils/captcha_remote_control.py",
+      "md5": "b34f507422138efb8d862244e2998157",
+      "size": 15091,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/captcha_remote_control.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/image_uploader.py",
+      "md5": "ec200027a9479e3834220c528bd85a4d",
+      "size": 11606,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/image_uploader.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/image_utils.py",
+      "md5": "364beb33830fb20fd8cea15029c3dc3e",
+      "size": 9654,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/image_utils.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/item_search.py",
+      "md5": "9b716bc8291c92906acedde23a1e7907",
+      "size": 73253,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/item_search.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/notification_dispatcher.py",
+      "md5": "16f160aa8e11cd3a4d8ffca35d70a8ec",
+      "size": 22283,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/notification_dispatcher.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/order_detail_fetcher.py",
+      "md5": "4d267861d34e0cf8ef2d169c9746d3b1",
+      "size": 121378,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/order_detail_fetcher.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/order_history_sync.py",
+      "md5": "89e5a38748b92961fbae463d9ca96e45",
+      "size": 16621,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/order_history_sync.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/qr_login.py",
+      "md5": "90b3f388aed48be71bf101ec77f4e484",
+      "size": 29823,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/qr_login.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/refresh_util.py",
+      "md5": "90e9a5be9865d110396f1247b38bcd6d",
+      "size": 97100,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/refresh_util.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/slider_patch.py",
+      "md5": "209664d89ebabe4d43998b7dda06cebb",
+      "size": 107066,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/slider_patch.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/time_utils.py",
+      "md5": "7db80adc4bf9224626beca3592ce8b21",
+      "size": 3701,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/time_utils.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/xianyu_slider_stealth.py",
+      "md5": "eea2d9e83116a83ac433aae7d7e6418c",
+      "size": 401520,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/xianyu_slider_stealth.py",
+      "requires_restart": true,
+      "description": ""
+    },
+    {
+      "path": "utils/xianyu_utils.py",
+      "md5": "55f4164075f5514acb7cbf4973089bc2",
+      "size": 17565,
+      "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/utils/xianyu_utils.py",
+      "requires_restart": true,
+      "description": ""
+    }
+  ],
+  "deleted_files": []
+}
