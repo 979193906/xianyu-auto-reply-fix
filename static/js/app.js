@@ -4526,6 +4526,21 @@ async function editCookieInline(id, currentValue) {
     }
 }
 
+// 切换密码显示/隐藏
+function togglePasswordVisibility() {
+    const passwordInput = document.getElementById('editAccountPassword');
+    const toggleIcon = document.getElementById('togglePasswordIcon');
+    if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        toggleIcon.classList.remove('bi-eye');
+        toggleIcon.classList.add('bi-eye-slash');
+    } else {
+        passwordInput.type = 'password';
+        toggleIcon.classList.remove('bi-eye-slash');
+        toggleIcon.classList.add('bi-eye');
+    }
+}
+
 // 打开账号编辑模态框
 async function openAccountEditModal(accountData) {
     // 设置模态框数据
@@ -4534,6 +4549,10 @@ async function openAccountEditModal(accountData) {
     document.getElementById('editAccountCookie').value = accountData.value || '';
     document.getElementById('editAccountUsername').value = accountData.username || '';
     document.getElementById('editAccountPassword').value = accountData.password || '';
+    // 重置密码为隐藏状态
+    document.getElementById('editAccountPassword').type = 'password';
+    document.getElementById('togglePasswordIcon').classList.remove('bi-eye-slash');
+    document.getElementById('togglePasswordIcon').classList.add('bi-eye');
     document.getElementById('editAccountShowBrowser').checked = accountData.show_browser || false;
     
     // 显示账号ID
