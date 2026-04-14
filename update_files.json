@@ -265,16 +265,16 @@
     },
     {
       "path": "static/index.html",
-      "md5": "c9a6db7dc5ff04eb7116ccb268a59724",
-      "size": 826624,
+      "md5": "194552e160edf29de50a1c73e14c0a2e",
+      "size": 826628,
       "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/index.html",
       "requires_restart": false,
       "description": ""
     },
     {
       "path": "static/js/app.js",
-      "md5": "a4f9181c40d125a6f937d41c84f0485e",
-      "size": 751141,
+      "md5": "aeea209ebb0c98b628325689a1b535ad",
+      "size": 750513,
       "download_url": "https://raw.githubusercontent.com/979193906/xianyu-auto-reply-fix/v2.1.1/static/js/app.js",
       "requires_restart": false,
       "description": ""
