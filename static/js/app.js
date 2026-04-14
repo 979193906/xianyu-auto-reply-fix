@@ -25,6 +25,32 @@ let dashboardAnnouncementState = {
     history: []
 };
 
+// 账号备注缓存（cookie_id → remark）
+let accountRemarkCache = {};
+
+// 更新备注缓存（从含 remark 的账号数据中提取）
+function updateRemarkCache(accounts) {
+    if (!Array.isArray(accounts)) return;
+    accounts.forEach(a => {
+        const id = typeof a === 'string' ? a : (a.id || '');
+        const remark = typeof a === 'object' ? (a.remark || '') : '';
+        if (id) accountRemarkCache[id] = remark;
+    });
+}
+
+// 获取账号显示标签：有备注显示 "备注 (ID)"，无备注仅显示 ID
+function getAccountLabel(accountId) {
+    const remark = (accountRemarkCache[accountId] || '').trim();
+    if (remark) return `${remark} (${accountId})`;
+    return accountId || '未命名账号';
+}
+
+// 获取账号短标签：有备注仅显示备注，无备注显示 ID
+function getAccountShortLabel(accountId) {
+    const remark = (accountRemarkCache[accountId] || '').trim();
+    return remark || accountId || '未命名账号';
+}
+
 // 账号关键词缓存
 let accountKeywordCache = {};
 let cacheTimestamp = 0;
@@ -1039,6 +1065,7 @@ async function loadDashboard() {
     if (cookiesResponse.ok) {
         const cookiesData = await cookiesResponse.json();
 
+        updateRemarkCache(cookiesData);
         const accountsWithKeywords = await enrichDashboardAccounts(cookiesData);
 
         dashboardData.accounts = accountsWithKeywords;
@@ -2144,6 +2171,7 @@ async function refreshAccountList() {
 
     if (response.ok) {
         const accounts = await response.json();
+        updateRemarkCache(accounts);
         const select = document.getElementById('accountSelect');
         select.innerHTML = '<option value="">🔍 请选择一个账号开始配置...</option>';
 
@@ -2216,7 +2244,7 @@ async function refreshAccountList() {
             status = ` (${account.keywordCount} 个关键词)`;
         }
 
-        option.textContent = `${icon} ${account.id}${status}`;
+        option.textContent = `${icon} ${getAccountLabel(account.id)}${status}`;
         select.appendChild(option);
         });
 
@@ -2242,7 +2270,7 @@ async function refreshAccountList() {
             status = ` (${account.keywordCount} 个关键词) [已禁用]`;
             }
 
-            option.textContent = `${icon} ${account.id}${status}`;
+            option.textContent = `${icon} ${getAccountLabel(account.id)}${status}`;
             option.style.color = '#6b7280';
             option.style.fontStyle = 'italic';
             select.appendChild(option);
@@ -3836,7 +3864,7 @@ function populateAboutAccountOptions(accounts) {
         <option value="">请选择账号</option>
         ${accounts.map(account => {
             const runningSuffix = account.runtime_status?.running ? ' · 运行中' : '';
-            return `<option value="${escapeHtml(account.id)}">${escapeHtml(account.id + runningSuffix)}</option>`;
+            return `<option value="${escapeHtml(account.id)}">${escapeHtml(getAccountLabel(account.id) + runningSuffix)}</option>`;
         }).join('')}
     `;
 }
@@ -3874,6 +3902,7 @@ async function loadAboutDiagnostics() {
     try {
         const previousAccountId = getAboutSelectedAccountId();
         const accounts = await fetchJSON(`${apiBase}/cookies/details`);
+        updateRemarkCache(accounts);
         aboutDiagnosticsAccounts = Array.isArray(accounts) ? accounts : [];
         populateAboutAccountOptions(aboutDiagnosticsAccounts);
 
@@ -4041,6 +4070,7 @@ async function loadCookies() {
     tbody.innerHTML = '';
 
     const cookieDetails = await fetchJSON(apiBase + '/cookies/details');
+    updateRemarkCache(cookieDetails);
 
     if (cookieDetails.length === 0) {
         tbody.innerHTML = `
@@ -4136,6 +4166,7 @@ async function loadCookies() {
         <td class="align-middle">
             <div class="cookie-id">
             <strong class="text-primary">${cookie.id}</strong>
+            ${cookie.remark ? `<div class="text-muted small">${escapeHtml(cookie.remark)}</div>` : ''}
             </div>
         </td>
         <td class="align-middle">
@@ -4609,6 +4640,7 @@ async function saveAccountEdit() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ remark: remark })
             });
+            accountRemarkCache[id] = remark;
         }
         
         // 保存代理配置
@@ -4993,7 +5025,7 @@ async function showCommentTemplates(accountId) {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="commentTemplatesModalLabel">
-                                <i class="bi bi-star-fill text-warning me-2"></i>好评模板管理 - ${accountId}
+                                <i class="bi bi-star-fill text-warning me-2"></i>好评模板管理 - ${escapeHtml(getAccountLabel(accountId))}
                             </h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
@@ -5553,8 +5585,8 @@ async function openDefaultReplyManager() {
 // 加载默认回复列表
 async function loadDefaultReplies() {
     try {
-    // 获取所有账号
-    const accountsResponse = await fetch(`${apiBase}/cookies`, {
+    // 获取所有账号（含备注）
+    const accountsResponse = await fetch(`${apiBase}/cookies/details`, {
         headers: {
         'Authorization': `Bearer ${authToken}`
         }
@@ -5564,7 +5596,9 @@ async function loadDefaultReplies() {
         throw new Error('获取账号列表失败');
     }
 
-    const accounts = await accountsResponse.json();
+    const accountsData = await accountsResponse.json();
+    updateRemarkCache(accountsData);
+    const accounts = accountsData.map(a => a.id);
 
     // 获取所有默认回复设置
     const repliesResponse = await fetch(`${apiBase}/default-replies`, {
@@ -5625,7 +5659,7 @@ function renderDefaultRepliesList(accounts, defaultReplies) {
 
     tr.innerHTML = `
         <td>
-        <strong class="text-primary">${accountId}</strong>
+        <strong class="text-primary">${escapeHtml(getAccountLabel(accountId))}</strong>
         </td>
         <td>${statusBadge}</td>
         <td>${replyOnceBadge}</td>
@@ -7231,8 +7265,8 @@ async function testNotificationTemplate(templateType) {
 // 加载消息通知配置
 async function loadMessageNotifications() {
     try {
-    // 获取所有账号
-    const accountsResponse = await fetch(`${apiBase}/cookies`, {
+    // 获取所有账号（含备注）
+    const accountsResponse = await fetch(`${apiBase}/cookies/details`, {
         headers: {
         'Authorization': `Bearer ${authToken}`
         }
@@ -7242,7 +7276,9 @@ async function loadMessageNotifications() {
         throw new Error('获取账号列表失败');
     }
 
-    const accounts = await accountsResponse.json();
+    const accountsData = await accountsResponse.json();
+    updateRemarkCache(accountsData);
+    const accounts = accountsData.map(a => a.id);
 
     // 获取所有通知配置
     const notificationsResponse = await fetch(`${apiBase}/message-notifications`, {
@@ -7299,7 +7335,7 @@ function renderMessageNotifications(accounts, notifications) {
         '<span class="badge bg-secondary">禁用</span>';
 
     tr.innerHTML = `
-        <td><strong class="text-primary">${accountId}</strong></td>
+        <td><strong class="text-primary">${escapeHtml(getAccountLabel(accountId))}</strong></td>
         <td>${channelsList}</td>
         <td>${status}</td>
         <td>
@@ -9984,6 +10020,7 @@ async function loadCookieFilter(id) {
 
     if (response.ok) {
         const accounts = await response.json();
+        updateRemarkCache(accounts);
         const select = document.getElementById(id);
 
         // 保存当前选择的值
@@ -10015,7 +10052,7 @@ async function loadCookieFilter(id) {
         enabledAccounts.forEach(account => {
         const option = document.createElement('option');
         option.value = account.id;
-        option.textContent = `🟢 ${account.id}`;
+        option.textContent = `🟢 ${getAccountLabel(account.id)}`;
         select.appendChild(option);
         });
 
@@ -10033,7 +10070,7 @@ async function loadCookieFilter(id) {
         disabledAccounts.forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
-            option.textContent = `🔴 ${account.id} (已禁用)`;
+            option.textContent = `🔴 ${getAccountLabel(account.id)} (已禁用)`;
             select.appendChild(option);
         });
         }
@@ -10203,7 +10240,7 @@ function displayCurrentPageItems() {
                         data-item-id="${escapeHtml(item.item_id)}"
                         onchange="updateSelectAllState()">
             </td>
-            <td>${escapeHtml(item.cookie_id)}</td>
+            <td>${escapeHtml(getAccountLabel(item.cookie_id))}</td>
             <td>${escapeHtml(item.item_id)}</td>
             <td title="${escapeHtml(item.item_title || '未设置')}">${escapeHtml(itemTitleDisplay)}</td>
             <td title="${escapeHtml(getItemDetailText(item.item_detail || ''))}">${escapeHtml(itemDetailDisplay)}</td>
@@ -10827,6 +10864,7 @@ async function loadCookieFilterPlus(id) {
 
     if (response.ok) {
         const accounts = await response.json();
+        updateRemarkCache(accounts);
         const select = document.getElementById(id);
 
         // 保存当前选择的值
@@ -10858,7 +10896,7 @@ async function loadCookieFilterPlus(id) {
         enabledAccounts.forEach(account => {
         const option = document.createElement('option');
         option.value = account.id;
-        option.textContent = `🟢 ${account.id}`;
+        option.textContent = `🟢 ${getAccountLabel(account.id)}`;
         select.appendChild(option);
         });
 
@@ -10876,7 +10914,7 @@ async function loadCookieFilterPlus(id) {
         disabledAccounts.forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
-            option.textContent = `🔴 ${account.id} (已禁用)`;
+            option.textContent = `🔴 ${getAccountLabel(account.id)} (已禁用)`;
             select.appendChild(option);
         });
         }
@@ -13302,6 +13340,8 @@ function editRemark(cookieId, currentRemark) {
             });
 
             if (response.ok) {
+                // 更新备注缓存
+                accountRemarkCache[cookieId] = newRemark;
                 // 更新显示
                 remarkCell.innerHTML = `
                     <span class="remark-display" onclick="editRemark('${cookieId}', '${newRemark.replace(/'/g, '&#39;')}')" title="点击编辑备注" style="cursor: pointer; color: #6c757d; font-size: 0.875rem;">
@@ -14323,6 +14363,7 @@ function createOrderRow(order) {
     const buyerId = escapeHtml(order.buyer_id || '-');
     const buyerNick = escapeHtml(order.buyer_nick || '-');
     const cookieId = escapeHtml(order.cookie_id || '-');
+    const cookieLabel = order.cookie_id ? escapeHtml(getAccountLabel(order.cookie_id)) : '-';
     const specName = escapeHtml(order.spec_name || '');
     const specValue = escapeHtml(order.spec_value || '');
     const specName2 = escapeHtml(order.spec_name_2 || '');
@@ -14377,8 +14418,8 @@ function createOrderRow(order) {
                 <span class="badge ${statusClass}">${escapeHtml(statusText)}</span>
             </td>
             <td>
-                <span class="text-truncate d-inline-block" style="max-width: 80px;" title="${cookieId === '-' ? '' : cookieId}">
-                    ${cookieId}
+                <span class="text-truncate d-inline-block" style="max-width: 120px;" title="${cookieId === '-' ? '' : cookieLabel}">
+                    ${cookieLabel}
                 </span>
             </td>
             <td>
@@ -14587,6 +14628,7 @@ async function fetchOrderSyncAccounts(forceRefresh = false) {
     }
 
     const accounts = await response.json();
+    updateRemarkCache(accounts);
     orderHistorySyncAccounts = Array.isArray(accounts) ? accounts : [];
     return orderHistorySyncAccounts;
 }
@@ -18634,7 +18676,7 @@ function showAccountFaceVerificationModal(accountId, screenshot) {
     // 更新模态框标题
     const modalTitle = document.getElementById('passwordLoginQRModalLabel');
     if (modalTitle) {
-        modalTitle.innerHTML = `<i class="bi bi-shield-exclamation text-warning me-2"></i>账号验证 - 账号 ${accountId}`;
+        modalTitle.innerHTML = `<i class="bi bi-shield-exclamation text-warning me-2"></i>账号验证 - ${escapeHtml(getAccountLabel(accountId))}`;
     }
     
     // 显示截图
@@ -19288,7 +19330,7 @@ async function refreshChatAccounts() {
             accounts.forEach(a => {
                 const div = document.createElement('div');
                 div.className = 'chat-account-item' + (a.id === chatCurrentCookieId ? ' active' : '');
-                div.innerHTML = `<div class="chat-account-dot ${a.connected ? 'online' : 'offline'}"></div><div class="chat-account-name" title="${escapeHtml(a.id)}">${escapeHtml(a.name || a.id)}</div>`;
+                div.innerHTML = `<div class="chat-account-dot ${a.connected ? 'online' : 'offline'}"></div><div class="chat-account-name" title="${escapeHtml(a.id)}">${escapeHtml(a.name || getAccountShortLabel(a.id))}</div>`;
                 div.onclick = () => selectChatAccount(a.id);
                 body.appendChild(div);
             });
@@ -20254,7 +20296,7 @@ async function openPolishScheduleModal(accountId) {
                     <div class="modal-content">
                         <div class="modal-header">
                             <h5 class="modal-title" id="polishScheduleModalLabel">
-                                <i class="bi bi-clock-history text-info me-2"></i>定时擦亮 - ${accountId}
+                                <i class="bi bi-clock-history text-info me-2"></i>定时擦亮 - ${escapeHtml(getAccountLabel(accountId))}
                             </h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
